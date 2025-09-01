@@ -103,14 +103,18 @@ export const HexBoard: React.FC = () => {
   // Побудова попередніх «шляхів» — підсвічення клітинок, через які
   // піде обрана кістка у кожному з 6 напрямків (допомагає дивитися траєкторію
   // з урахуванням рикошетів/обгортань і блокувань іншими кістками). Вимикаємо під час поглинання
+  // ПРАВКА: показуємо шляхи лише для ТИХ напрямків, де кінцева клітинка — ЛЕГАЛЬНА (а не «урвана» перешкодою)
   const paths: { row: number; col: number }[][] = [];
   if (state.selected && !absorb) {
     const selDie = engine.getDieAt(state.selected.row, state.selected.col);
     if (selDie) {
       const directions = engine.getDirectionVectors();
+      const legalTargets = new Set(availableMoves.map(m => `${m.row},${m.col}`));
       for (const dir of directions) {
         const path = engine.getMovePath(selDie, dir);
-        if (path.length > 0) paths.push(path);
+        const last = path[path.length - 1];
+        const isComplete = path.length === selDie.value && last && legalTargets.has(`${last.row},${last.col}`);
+        if (isComplete) paths.push(path);
       }
     }
   }
