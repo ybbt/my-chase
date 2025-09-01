@@ -40,6 +40,8 @@ export const HexBoard: React.FC = () => {
   const state = engine.state;           // поточний стан гри
   const absorb = state.absorb;          // режим поглинання (якщо є)
 
+  
+
   // Запитуємо у рушія валідні цілі для обраної кістки (у режимі поглинання рушій поверне [])
   const availableMoves = engine.getAvailableMoves();
 
@@ -67,6 +69,8 @@ export const HexBoard: React.FC = () => {
   const handleHexClick = (row: number, col: number) => {
     // Якщо йде поглинання — кліки інтерпретуємо як вибір кістки-захисника
     if (state.absorb) {
+      // Якщо все вже розподілено — ігноруємо кліки, просто чекаємо «Готово» або «Скинути»
+      if (state.absorb.remaining === 0) return;
       // Дозволяємо клік лише по «поточній найслабшій» кістці захисника
       const key = `${row},${col}`;
       if (weakestKey.has(key)) {
@@ -121,10 +125,12 @@ export const HexBoard: React.FC = () => {
   // UI Оверлей для режиму поглинання
   // -------------------------------
   const Overlay = () => !absorb ? null : (
-    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: 'rgba(255,255,255,0.95)', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: 'rgba(255,255,255,0.95)', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 320, lineHeight: 1.4, wordBreak: 'break-word' }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>Поглинання — команда {absorb.defender}</div>
-      <div style={{ marginBottom: 8 }}>Залишилось розподілити: <b>{absorb.remaining}</b></div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      {absorb.remaining > 0 && (
+        <div style={{ marginBottom: 8 }}>Залишилось розподілити: <b>{absorb.remaining}</b></div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => { engine.forceAutoAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining === 0 || (engine.getAbsorbWeakest().length === 0 && absorb.remaining > 0)}>
           Авто
         </button>
@@ -136,14 +142,15 @@ export const HexBoard: React.FC = () => {
         </button>
       </div>
       <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-        {engine.getAbsorbWeakest().length > 1 && (
-          <>Є кілька найслабших — оберіть одну.</>
-        )}
-        {engine.getAbsorbWeakest().length === 0 && absorb.remaining > 0 && (
-          <>Немає доступних кісток &lt; 6 — решта {absorb.remaining} не може бути розподілена.</>
-        )}
-        {engine.getAbsorbWeakest().length === 1 && absorb.remaining > 0 && (
-          <>Найслабша одна — підвищення відбувається автоматично.</>
+        {absorb.remaining === 0 ? (
+          <>Розподіл завершено. Натисніть «Готово», щоб підтвердити, або «Скинути», щоб змінити.</>
+        ) : (
+          (() => {
+            const count = engine.getAbsorbWeakest().length;
+            if (count > 1) return <>Є кілька найслабших — оберіть одну.</>;
+            if (count === 0) return <>Немає доступних кісток &lt; 6 — решта {absorb.remaining} не може бути розподілена.</>;
+            return <>Найслабша одна — підвищення відбувається автоматично.</>;
+          })()
         )}
       </div>
     </div>
@@ -172,7 +179,7 @@ export const HexBoard: React.FC = () => {
             if (isAvailable) fill = isBump ? '#fef08a' : '#bbf7d0';
             if (isSelected) fill = '#60a5fa';
           } else {
-            if (weakestKey.has(`${row},${col}`)) fill = '#86efac'; // зелена підсвітка кандидата
+            if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = '#86efac'; // зелена підсвітка кандидата лише коли ще є бали
           }
 
           return (
