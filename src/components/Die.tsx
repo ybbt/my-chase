@@ -1,15 +1,21 @@
+// =============================
+// src/components/Die.tsx
+// =============================
+// Компонент відмальовує одну «кістку» (die) як квадрат з цифрою поверх гекс-клітинки.
+// Це презентаційний компонент: не містить правил, лише викликає onClick.
+
 import React from 'react';
 
 interface DieProps {
-  cx: number;
-  cy: number;
-  value: number;
-  color: 'red' | 'blue';
-  onClick?: () => void;
+  cx: number; // центр по X у SVG-координатах
+  cy: number; // центр по Y у SVG-координатах
+  value: number; // значення кістки (швидкість/кроки)
+  color: 'red' | 'blue'; // колір гравця
+  onClick?: () => void; // хендлер кліку
 }
 
 export const Die: React.FC<DieProps> = ({ cx, cy, value, color, onClick }) => {
-  const size = 24;
+  const size = 24; // розмір «кубика»
   const x = cx - size / 2;
   const y = cy - size / 2;
 
