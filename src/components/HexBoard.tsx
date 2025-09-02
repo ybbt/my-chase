@@ -290,17 +290,35 @@ export const HexBoard: React.FC = () => {
             const delta = Math.abs(cell.col - prevCol);
             if (!wrapped && delta > 1) {
               wrapped = true;
-              // напрямок: вправо (8→0) чи вліво (0→8)
-              const movingRight = (prevCol === 8 && cell.col === 0) || (cx > prevX);
-              // доведемо пряму до краю гекса попередньої клітинки
-              const preEdgeX = prevX + (movingRight ? HEX_WIDTH / 2 : -HEX_WIDTH / 2);
-              const preEdgeY = prevY;
+              // напрямок wrap: вправо (8→0) чи вліво (0→8)
+              const movingRight = (prevCol === 8 && cell.col === 0)
+                ? true
+                : (prevCol === 0 && cell.col === 8)
+                ? false
+                : (cell.col > prevCol);
+
+              // «Розмотуємо» координату наступного центру по X, щоб отримати локальний вектор руху
+              const boardW = cols * HEX_WIDTH;
+              const nextAdjX = movingRight ? (cx + boardW) : (cx - boardW);
+              const nextAdjY = cy;
+
+              // Одиничний вектор напрямку від попереднього центру до «розмотаного» наступного
+              const vx = nextAdjX - prevX; const vy = nextAdjY - prevY;
+              const vlen = Math.hypot(vx, vy) || 1;
+              const ux = vx / vlen; const uy = vy / vlen;
+
+              // Точка виходу до краю попереднього гекса (на пів HEX_WIDTH у напрямку руху)
+              const preEdgeX = prevX + ux * (HEX_WIDTH / 2);
+              const preEdgeY = prevY + uy * (HEX_WIDTH / 2);
               pre.push(`${preEdgeX},${preEdgeY}`);
-              // і почнемо з протилежного краю нової клітинки
-              const postEdgeX = cx + (movingRight ? -HEX_WIDTH / 2 : HEX_WIDTH / 2);
-              const postEdgeY = cy;
+
+              // Точка входу з протилежного краю наступного гекса (дзеркально)
+              const postEdgeAdjX = nextAdjX - ux * (HEX_WIDTH / 2);
+              const postEdgeAdjY = nextAdjY - uy * (HEX_WIDTH / 2);
+              const postEdgeX = movingRight ? (postEdgeAdjX - boardW) : (postEdgeAdjX + boardW);
+              const postEdgeY = postEdgeAdjY;
               post.push(`${postEdgeX},${postEdgeY}`);
-              // додаємо сам центр цієї клітинки
+              // Додаємо сам центр цієї клітинки
               post.push(`${cx},${cy}`);
             } else {
               if (wrapped) post.push(`${cx},${cy}`); else pre.push(`${cx},${cy}`);

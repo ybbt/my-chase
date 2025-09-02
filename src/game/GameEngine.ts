@@ -117,10 +117,9 @@ export class GameEngine {
         let nextR = r + stepDr;
         let nextC = c + stepDc;
 
-        // центр (4,4): не можна проходити, лише точно зупинитись
-        if ((r === 4 && c === 4) || (nextR === 4 && nextC === 4)) {
-          if (!(steps === 1 && nextR === 4 && nextC === 4)) { valid = false; break; }
-        }
+        // центр (4,4): не можна ПРОХОДИТИ, але можна СТАТИ точно останнім кроком;
+        // вихід ІЗ центру дозволено
+        if (nextR === 4 && nextC === 4 && steps !== 1) { valid = false; break; }
 
         // wrap по колонках
         if (nextC < 0) nextC = 8; else if (nextC > 8) nextC = 0;
@@ -162,9 +161,8 @@ export class GameEngine {
       let nextR = row + stepDr;
       let nextC = col + stepDc;
 
-      if ((row === 4 && col === 4) || (nextR === 4 && nextC === 4)) {
-        if (!(steps === 1 && nextR === 4 && nextC === 4)) break;
-      }
+      // центр (4,4): не можна ПРОХОДИТИ, але можна СТАТИ точно останнім кроком; вихід ІЗ центру дозволено
+      if (nextR === 4 && nextC === 4 && steps !== 1) break;
 
       if (nextC < 0) nextC = 8; else if (nextC > 8) nextC = 0;
 
@@ -225,8 +223,18 @@ export class GameEngine {
   }
 
   private performBump(row: number, col: number, direction: [number, number]): boolean {
-    const bumpChain: { die: Die; direction: [number, number] }[] = [];
-    let curRow = row, curCol = col; let dx = direction[0], dy = direction[1];
+    // НОВА ЛОГІКА: будуємо ланцюжок бампа як послідовність
+    //   { die, nextRow, nextCol }
+    // де nextRow/nextCol — КОНКРЕТНА наступна клітинка для кожної фішки
+    // (з урахуванням рикошетів і wrap). Потім зсуваємо у зворотному порядку,
+    // переносячи кожну фішку точно у свій nextRow/nextCol — так ми уникаємо
+    // артефактів «вильоту» за межі чи неправильного напрямку після рикошету.
+
+    type BumpLink = { die: Die; nextRow: number; nextCol: number };
+    const chain: BumpLink[] = [];
+
+    let curRow = row, curCol = col; // клітинка, куди ми в'їжджаємо (зайнята своєю фішкою)
+    let dx = direction[0], dy = direction[1];
     const seen = new Set<string>();
 
     while (true) {
@@ -235,42 +243,52 @@ export class GameEngine {
       seen.add(key);
 
       const die = this.getDieAt(curRow, curCol);
-      if (!die) break;
-      bumpChain.push({ die, direction: [dx, dy] });
+      if (!die) break; // теоретично не має статись
 
       const isEven = curRow % 2 === 0;
-      const [stepDr, stepDc] = this.getOffsetStep(dx, dy, isEven);
-      let nextRow = curRow + stepDr; let nextCol = curCol + stepDc;
+      // крок за поточним напрямком з урахуванням парності рядка
+      let [stepDr, stepDc] = this.getOffsetStep(dx, dy, isEven);
+      let nextRow = curRow + stepDr;
+      let nextCol = curCol + stepDc;
 
+      // wrap по колонках
       if (nextCol < 0) nextCol = 8; else if (nextCol > 8) nextCol = 0;
 
+      // рикошет по верх/низ: інвертуємо вертикальний напрям і ПЕРЕРАХОВУЄМО крок
       if (nextRow < 0 || nextRow > 8) {
-        dx = -dx;
-        const [reflectDr, reflectDc] = this.getOffsetStep(dx, dy, isEven);
-        nextRow = curRow + reflectDr; nextCol = curCol + reflectDc;
-        if (nextRow < 0 || nextRow > 8) return false;
+        dx = -dx; // інвертуємо вертикальну складову напрямку
+        [stepDr, stepDc] = this.getOffsetStep(dx, dy, isEven);
+        nextRow = curRow + stepDr;
+        nextCol = curCol + stepDc;
+        if (nextCol < 0) nextCol = 8; else if (nextCol > 8) nextCol = 0;
+        if (nextRow < 0 || nextRow > 8) return false; // якщо все одно вилітаємо — забороняємо бамп
       }
 
-      if (nextRow === 4 && nextCol === 4) return false; // не можна бампнути в центр
+      // не дозволяємо штовхнути когось у центр
+      if (nextRow === 4 && nextCol === 4) return false;
 
       const nextDie = this.getDieAt(nextRow, nextCol);
-      if (!nextDie) break; // далі пусто — закінчимо
+      // фіксуємо фактичний наступний крок для поточної фішки
+      chain.push({ die, nextRow, nextCol });
+
+      // якщо далі порожньо — готово, є куди «висунути» крайній елемент
+      if (!nextDie) break;
+
+      // якщо далі суперник — відбувається захоплення і штовхати більше нікого
       if (nextDie.color !== die.color) { this.captureDieAt(nextRow, nextCol); break; }
 
+      // інакше ланцюжок продовжується своєю фішкою
       curRow = nextRow; curCol = nextCol;
     }
 
-    // заборонити, якщо хтось з ланцюжка у центрі
-    if (bumpChain.some(({ die }) => die.row === 4 && die.col === 4)) return false;
+    // заборонити, якщо хтось з ланцюжка стоїть у центрі (параноя — хоча вище ми вже не даємо next=центр)
+    if (chain.some(link => link.die.row === 4 && link.die.col === 4)) return false;
 
-    // зрушуємо у зворотному порядку
-    for (let i = bumpChain.length - 1; i >= 0; i--) {
-      const { die } = bumpChain[i];
-      const isEven = die.row % 2 === 0;
-      const [stepDr, stepDc] = this.getOffsetStep(direction[0], direction[1], isEven);
-      const newRow = die.row + stepDr; const newCol = (die.col + stepDc + 9) % 9;
-      if (newRow === 4 && newCol === 4) return false;
-      die.row = newRow; die.col = newCol;
+    // тепер зсуваємо у ЗВОРОТНОМУ порядку — від «хвоста» до початку
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const link = chain[i];
+      link.die.row = link.nextRow;
+      link.die.col = link.nextCol;
     }
     return true;
   }

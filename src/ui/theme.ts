@@ -33,4 +33,3 @@ export const COLORS = {
     text: 'white',
   },
 } as const;
-
