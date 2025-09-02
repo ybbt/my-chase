@@ -5,6 +5,7 @@
 // Це презентаційний компонент: не містить правил, лише викликає onClick.
 
 import React from 'react';
+import { COLORS } from '../ui/theme';
 
 interface DieProps {
   cx: number; // центр по X у SVG-координатах
@@ -28,8 +29,8 @@ export const Die: React.FC<DieProps> = ({ cx, cy, value, color, onClick }) => {
         height={size}
         rx={4}
         ry={4}
-        fill={color}
-        stroke="black"
+        fill={COLORS.die[color].fill}
+        stroke={COLORS.die[color].stroke}
         strokeWidth={1.5}
         onClick={onClick}
         style={{ cursor: 'pointer' }}
@@ -39,7 +40,7 @@ export const Die: React.FC<DieProps> = ({ cx, cy, value, color, onClick }) => {
         y={cy + 5}
         textAnchor="middle"
         fontSize="14"
-        fill="white"
+        fill={COLORS.die.text}
         fontWeight="bold"
         pointerEvents="none"
       >

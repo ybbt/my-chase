@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { Die } from './Die';
 import { GameEngine } from '../game/GameEngine';
+import { COLORS } from '../ui/theme';
 
 // Геометрія гекса у пікселях (SVG)
 const HEX_SIZE = 30;
@@ -119,6 +120,11 @@ export const HexBoard: React.FC = () => {
     }
   }
 
+  // Кольори шляхів: червона фішка — червоні шляхи; синя — сині
+  const selectedDie = state.selected ? engine.getDieAt(state.selected.row, state.selected.col) : undefined;
+  const pathPalette = selectedDie?.color === 'red' ? COLORS.path.red : COLORS.path.blue;
+  const arrowId = selectedDie?.color === 'red' ? 'arrow-red' : 'arrow-blue';
+
   // Плоский список усіх координат клітинок для рендера
   const hexes = [] as { row: number; col: number }[];
   for (let row = 0; row < rows; row++) {
@@ -129,7 +135,7 @@ export const HexBoard: React.FC = () => {
   // UI Оверлей для режиму поглинання
   // -------------------------------
   const Overlay = () => !absorb ? null : (
-    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: 'rgba(255,255,255,0.95)', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 320, lineHeight: 1.4, wordBreak: 'break-word' }}>
+    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: COLORS.absorb.overlayBg, border: `1px solid ${COLORS.absorb.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 320, lineHeight: 1.4, wordBreak: 'break-word' }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>Поглинання — команда {absorb.defender}</div>
       {absorb.remaining > 0 && (
         <div style={{ marginBottom: 8 }}>Залишилось розподілити: <b>{absorb.remaining}</b></div>
@@ -164,6 +170,14 @@ export const HexBoard: React.FC = () => {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <Overlay />
       <svg width="100%" height="100%" viewBox="-50 -50 800 800">
+        <defs>
+          <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L10,5 L0,10 Z" fill={COLORS.path.blue.arrow} />
+          </marker>
+          <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L10,5 L0,10 Z" fill={COLORS.path.red.arrow} />
+          </marker>
+        </defs>
         {/* Рендер сітки гексів з підсвіткою */}
         {hexes.map(({ row, col }) => {
           const isEvenRow = row % 2 === 0; // зсув парних рядків
@@ -176,14 +190,29 @@ export const HexBoard: React.FC = () => {
           const move = !absorb ? availableMoves.find(p => p.row === row && p.col === col) : undefined;
           const isAvailable = !!move;     // чи можна закінчити хід тут
           const isBump = move?.bump;      // чи це бамп-плитка
+          const endDie = !absorb ? engine.getDieAt(row, col) : undefined; // хто зараз стоїть у цілі
+          const isCapture = isAvailable && !isBump && !!endDie && endDie.color !== state.currentPlayer; // взяття?
 
           // Якщо йде поглинання — підсвічуємо лише поточних «найслабших» захисника
-          let fill = isCenter ? '#fde047' : '#e5e7eb';
+          let fill: string = isCenter ? COLORS.board.center : COLORS.board.cell;
+          let strokeClr: string = COLORS.board.border;
+          let strokeW = 1;
           if (!absorb) {
-            if (isAvailable) fill = isBump ? '#fef08a' : '#bbf7d0';
-            if (isSelected) fill = '#60a5fa';
+            if (isAvailable) {
+              if (isBump) {
+                fill = COLORS.move.bumpFill;
+              } else if (isCapture) {
+                // Інтенсивніша підсвітка взяття + червона обводка
+                fill = COLORS.move.captureFill;        // red-400
+                strokeClr = COLORS.move.captureStroke;   // red-500
+                strokeW = 1.5;
+              } else {
+                fill = COLORS.move.emptyFill;
+              }
+            }
+            if (isSelected) fill = COLORS.move.selected;
           } else {
-            if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = '#86efac'; // зелена підсвітка кандидата лише коли ще є бали
+            if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = COLORS.absorb.candidate; // зелена підсвітка кандидата лише коли ще є бали
           }
 
           return (
@@ -191,8 +220,8 @@ export const HexBoard: React.FC = () => {
               key={`hex-${row}-${col}`}
               points={getHexPoints(cx, cy, HEX_SIZE)}
               fill={fill}
-              stroke="#333"
-              strokeWidth={1}
+              stroke={strokeClr}
+              strokeWidth={strokeW}
               onClick={() => handleHexClick(row, col)}
               style={{ cursor: 'pointer' }}
             />
@@ -208,8 +237,8 @@ export const HexBoard: React.FC = () => {
             <polygon
               key={`bump-${i}`}
               points={getHexPoints(cx, cy, HEX_SIZE)}
-              fill="#fde68a55"
-              stroke="#facc15"
+              fill={COLORS.path.bumpCellsFill}
+              stroke={COLORS.path.bumpCellsStroke}
               strokeWidth={0.5}
               style={{ pointerEvents: 'none' }}
             />
@@ -226,14 +255,109 @@ export const HexBoard: React.FC = () => {
               <polygon
                 key={`path-${i}-${j}`}
                 points={getHexPoints(cx, cy, HEX_SIZE)}
-                fill="#93c5fd55"
-                stroke="#3b82f6"
+                fill={pathPalette.hexFill}
+                stroke={pathPalette.stroke}
                 strokeWidth={0.5}
                 style={{ pointerEvents: 'none' }}
               />
             );
           })
         )}
+
+        {/* Лінія через центри гексів уздовж кожного валідного шляху */}
+        {!absorb && paths.map((path, i) => {
+          if (!selectedDie) return null;
+          // Стартова точка — центр обраної фішки
+          const isEven0 = selectedDie.row % 2 === 0;
+          const sx = selectedDie.col * HEX_WIDTH + (isEven0 ? HEX_WIDTH / 2 : 0);
+          const sy = selectedDie.row * HEX_HEIGHT * 0.75;
+
+          // Розіб'ємо лінію на дві частини, якщо є wrap по горизонталі:
+          // до краю (pre) і від протилежного краю (post)
+          const pre: string[] = [`${sx},${sy}`];
+          const post: string[] = [];
+          let wrapped = false;
+          let prevCol = selectedDie.col;
+          let prevX = sx, prevY = sy;
+
+          for (let k = 0; k < path.length; k++) {
+            const cell = path[k];
+            const isEven = cell.row % 2 === 0;
+            const cx = cell.col * HEX_WIDTH + (isEven ? HEX_WIDTH / 2 : 0);
+            const cy = cell.row * HEX_HEIGHT * 0.75;
+
+            // wrap детектуємо за стрибком стовпця > 1 (0↔8)
+            const delta = Math.abs(cell.col - prevCol);
+            if (!wrapped && delta > 1) {
+              wrapped = true;
+              // напрямок: вправо (8→0) чи вліво (0→8)
+              const movingRight = (prevCol === 8 && cell.col === 0) || (cx > prevX);
+              // доведемо пряму до краю гекса попередньої клітинки
+              const preEdgeX = prevX + (movingRight ? HEX_WIDTH / 2 : -HEX_WIDTH / 2);
+              const preEdgeY = prevY;
+              pre.push(`${preEdgeX},${preEdgeY}`);
+              // і почнемо з протилежного краю нової клітинки
+              const postEdgeX = cx + (movingRight ? -HEX_WIDTH / 2 : HEX_WIDTH / 2);
+              const postEdgeY = cy;
+              post.push(`${postEdgeX},${postEdgeY}`);
+              // додаємо сам центр цієї клітинки
+              post.push(`${cx},${cy}`);
+            } else {
+              if (wrapped) post.push(`${cx},${cy}`); else pre.push(`${cx},${cy}`);
+            }
+            prevCol = cell.col; prevX = cx; prevY = cy;
+          }
+
+          if (!wrapped) {
+            // Без wrap — одна суцільна лінія з маркером на фініші
+            const pts = pre.join(' ');
+            return (
+              <polyline
+                key={`pline-${i}`}
+                points={pts}
+                fill="none"
+                stroke={pathPalette.stroke}
+                strokeWidth={2}
+                strokeOpacity={0.9}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                markerEnd={`url(#${arrowId})`}
+                style={{ pointerEvents: 'none' }}
+              />
+            );
+          }
+
+          // Є wrap — малюємо ДВІ лінії: до краю і від протилежного краю
+          return (
+            <>
+              <polyline
+                key={`pline-${i}-pre`}
+                points={pre.join(' ')}
+                fill="none"
+                stroke={pathPalette.stroke}
+                strokeWidth={2}
+                strokeOpacity={0.9}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray={'6 6'}
+                style={{ pointerEvents: 'none' }}
+              />
+              <polyline
+                key={`pline-${i}-post`}
+                points={post.join(' ')}
+                fill="none"
+                stroke={pathPalette.stroke}
+                strokeWidth={2}
+                strokeOpacity={0.9}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray={'6 6'}
+                markerEnd={`url(#${arrowId})`}
+                style={{ pointerEvents: 'none' }}
+              />
+            </>
+          );
+        })}
 
         {/* Рендер кісток поверх клітинок */}
         {state.dice.map((die, index) => {
