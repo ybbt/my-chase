@@ -215,6 +215,11 @@ export const HexBoard: React.FC = () => {
             if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = COLORS.absorb.candidate; // зелена підсвітка кандидата лише коли ще є бали
           }
 
+          if (isCenter) {
+            strokeW = 5;
+            strokeClr = COLORS.board.border;
+          }
+
           return (
             <polygon
               key={`hex-${row}-${col}`}

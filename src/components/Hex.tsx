@@ -11,6 +11,7 @@ export interface HexProps {
   size: number;    // радіус/розмір гекса
   fill?: string;   // заливка
   stroke?: string; // колір обводки
+  strokeWidth?: number; // товщина обводки
   onClick?: () => void; // клік по клітинці, якщо потрібно
 }
 
@@ -20,6 +21,7 @@ export const Hex: React.FC<HexProps> = ({
   size,
   fill = '#ddd',
   stroke = '#333',
+  strokeWidth = 1,
   onClick,
 }) => {
   // Обчислюємо 6 вершин регулярного гекса (кутова орієнтація -30°, 30°, ...)
@@ -35,7 +37,7 @@ export const Hex: React.FC<HexProps> = ({
       points={points.join(' ')}
       fill={fill}
       stroke={stroke}
-      strokeWidth={1}
+      strokeWidth={strokeWidth}
       onClick={onClick}
     />
   );

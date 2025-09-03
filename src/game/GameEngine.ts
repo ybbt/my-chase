@@ -1,31 +1,31 @@
 // =============================
 // src/game/GameEngine.ts
 // =============================
-// Серце правил гри. Тут реалізовано:
+// Серце правил гри CHASE.
+// Реалізовано:
 // - Початкова розстановка 9×9 (згідно з буклетом)
-// - Вибір кістки свого кольору
-// - Генерація легальних кінцевих клітинок ходу (getAvailableMoves)
+// - Вибір своєї кістки
+// - Генерація легальних кінцевих клітинок (getAvailableMoves)
 //   * RULE: рух рівно на значення кістки
-//   * RULE: 6 «ортогональних» напрямів на гекс-сітці
+//   * RULE: 6 напрямів на гекс-сітці
 //   * RULE: заборона проходу через інші кістки
 //   * RULE: заборона проходу через фіссійну камеру (крім точної зупинки)
-//   * RULE: wrap-around по стовпцях (циліндр)
-//   * RULE: рикошет від верх/низ країв (кут падіння = кут відбиття в дискретній моделі)
-//   * RULE: можливість закінчити хід на своїй (бамп) чи ворожій (захоплення) кістці
-// - Розрахунок маршрутів для підсвічування (getMovePath)
-// - Виконання руху з бампом/захопленням (moveSelectedTo + performBump)
-// - Режим «поглинання» після захоплення з авто/ручним tie-break (absorb)
-//
-// TODO:
-// - Окремий хід «передача швидкості» (transfer)
-// - Спліт у фіссійній камері
-// - Перевірка «гра закінчена при ≤4 кістках»
+//   * RULE: wrap по стовпцях (циліндр)
+//   * RULE: рикошет від верх/низ країв
+//   * RULE: можна закінчити хід на своїй (бамп) чи ворожій (захоплення) кістці
+// - Розрахунок маршрутів для підсвітки (getMovePath)
+// - Виконання руху (moveSelectedTo) з бампом/захопленням
+// - РЕЖИМ «поглинання» після захоплення (absorb)
+// - ВАЖЛИВО: виправлено СПЛІТ у центрі — половинки виходять по Осях навколо
+//   ПРОТИЛЕЖНОГО (outbound) напрямку (тобто «назовні»), а не навколо напрямку входу.
+//   Для прикладу: увійшли з NE (тобто останній крок у центр — із клітинки NE),
+//   половинки вийдуть на NW і E.
 
 export type Player = 'red' | 'blue';
 
 export interface Die {
-  row: number; // 0..8
-  col: number; // 0..8 (горизонталь з wrap)
+  row: number;   // 0..8
+  col: number;   // 0..8 (горизонталь з wrap)
   value: number; // 1..6
   color: Player;
 }
@@ -69,16 +69,17 @@ export class GameEngine {
     else this.state.selected = undefined;
   }
 
-  togglePlayer() {
-    this.state.currentPlayer = this.state.currentPlayer === 'red' ? 'blue' : 'red';
-  }
+  togglePlayer() { this.state.currentPlayer = this.state.currentPlayer === 'red' ? 'blue' : 'red'; }
 
-  // ---------- Рухи ----------
   getDirectionVectors(): [number, number][] {
+    // ПОРЯДОК У ЦЬОМУ МАСИВІ НЕ Є КОЛОВИМ. Для обчислень «сусід/протилежний» використовується кільце ring.
     return [
-      [-1, 0], [-1, 1],
-      [0, -1], [0, 1],
-      [1, 0], [1, 1],
+      [-1, 0], // 0: NW
+      [-1, 1], // 1: NE
+      [0, -1], // 2: W
+      [0, 1],  // 3: E
+      [1, 0],  // 4: SW
+      [1, 1],  // 5: SE
     ];
   }
 
@@ -117,8 +118,7 @@ export class GameEngine {
         let nextR = r + stepDr;
         let nextC = c + stepDc;
 
-        // центр (4,4): не можна ПРОХОДИТИ, але можна СТАТИ точно останнім кроком;
-        // вихід ІЗ центру дозволено
+        // центр (4,4): не можна ПРОХОДИТИ, але можна СТАТИ точно останнім кроком; вихід ІЗ центру дозволено
         if (nextR === 4 && nextC === 4 && steps !== 1) { valid = false; break; }
 
         // wrap по колонках
@@ -183,53 +183,181 @@ export class GameEngine {
     return path;
   }
 
+  // ---------- Рух фішки (включно зі сплітом у центрі) ----------
   moveSelectedTo(row: number, col: number): boolean {
-    if (this.state.absorb) return false; // під час поглинання ходи не робимо
+    if (this.state.absorb) return false;
     const sel = this.state.selected; if (!sel) return false;
     const die = this.getDieAt(sel.row, sel.col); if (!die) return false;
 
-    const possible = this.getAvailableMoves();
-    const legal = possible.some(p => p.row === row && p.col === col);
+    // Перевіряємо, що клітинка — легальна ціль
+    const legal = this.getAvailableMoves().some(p => p.row === row && p.col === col);
     if (!legal) return false;
 
     const prevPlayer = this.state.currentPlayer;
     const target = this.getDieAt(row, col);
 
-    if (target && target.color === die.color) {
-      // бамп по своїх
-      const directions = this.getDirectionVectors();
-      const direction = directions.find(dir => {
-        const path = this.getMovePath(die, dir);
-        const last = path[path.length - 1];
-        return last?.row === row && last?.col === col;
-      });
-      if (!direction) return false;
-      const bumped = this.performBump(row, col, direction);
-      if (!bumped) return false;
-      die.row = row; die.col = col; this.state.selected = undefined;
+    // --- СПЛІТ У ФІССІЙНІЙ КАМЕРІ ---
+    if (row === 4 && col === 4) {
+      const dirs = this.getDirectionVectors();
+
+      // 1) Знайти ФАКТИЧНИЙ НАПРЯМ ОСТАННЬОГО КРОКУ В ЦЕНТР (entryIdx)
+      //    Беремо шлях, який справді приводить у центр, і дивимось передостанню клітинку.
+      let entryIdx = -1;
+      let prevCell: { row: number; col: number } | undefined = undefined;
+      for (let i = 0; i < dirs.length; i++) {
+        const p = this.getMovePath(die, dirs[i]);
+        if (p.length && p[p.length - 1].row === 4 && p[p.length - 1].col === 4) {
+          prevCell = p.length >= 2 ? p[p.length - 2] : { row: die.row, col: die.col };
+          break;
+        }
+      }
+      if (!prevCell) return false;
+
+      // Обчислюємо, яким із 6 базових напрямів робиться ОСТАННІЙ крок
+      for (let i = 0; i < dirs.length; i++) {
+        const [dr, dc] = dirs[i];
+        const isEven = prevCell.row % 2 === 0;
+        const [sr, sc] = this.getOffsetStep(dr, dc, isEven);
+        let nr = prevCell.row + sr, nc = prevCell.col + sc;
+        if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
+        if (nr === 4 && nc === 4) { entryIdx = i; break; }
+      }
+      if (entryIdx === -1) return false;
+
+      // 2) Працюємо на кільці напрямів (годинниково): [E, SE, SW, W, NW, NE]
+      const ring: number[] = [3, 5, 4, 2, 0, 1];
+      const entryPos = ring.indexOf(entryIdx);
+      if (entryPos === -1) return false;
+
+      // 3) Протилежний (outbound) напрям та дві сусідні осі ±60° довкола нього
+      const outPos = (entryPos + 3) % 6;
+      // БІЛЬША має йти «вліво від ВХОДУ». Це те саме, що «вправо (CW) від OUTBOUND».
+      const leftIdx = ring[(outPos + 1) % 6];  // CW від outbound == ліво від входу
+      const rightIdx = ring[(outPos + 5) % 6]; // CCW від outbound == право від входу
+
+      // 4) Один крок із центру певним напрямом (з урахуванням парності та wrap)
+      const stepFrom = (r: number, c: number, dirIdx: number) => {
+        const [dr, dc] = dirs[dirIdx];
+        const isEven = r % 2 === 0;
+        let [sr, sc] = this.getOffsetStep(dr, dc, isEven);
+        let nr = r + sr, nc = c + sc;
+        if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
+        if (nr < 0) nr = 0; else if (nr > 8) nr = 8;
+        return { nr, nc };
+      };
+
+      const v = die.value;
+
+      if (v === 1) {
+        // акумулятор захоплень у цьому спец-випадку
+        const captured: Die[] = [];
+        const accumulate = (d: Die) => { captured.push(d); };
+
+        // перевіряємо клітинку виходу ліворуч від outbound
+        const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
+        const occ = this.getDieAt(Lr, Lc);
+        if (occ) {
+          if (occ.color === die.color) {
+            if (!this.performBump(Lr, Lc, dirs[leftIdx], { accumulateCapture: accumulate })) return false;
+          } else {
+            captured.push(occ);
+            // звільняємо клітинку: видаляємо захопленого зараз, аби поставити свою частину
+            this.state.dice = this.state.dice.filter(d => d !== occ);
+          }
+        }
+
+        // розміщуємо єдину частину
+        die.row = Lr; die.col = Lc; // value залишається 1
+
+        // якщо були захоплення — запускаємо одне поглинання на сумарне значення
+        if (captured.length > 0) {
+          const defender = captured[0].color;
+          const total = captured.reduce((s, d) => s + d.value, 0);
+          this.state.absorb = { defender, remaining: total, captured: total, draft: [], tieLock: false, userChoice: false };
+          const a = this.state.absorb;
+          a.tieLock = (a.remaining > 0) && (this.getAbsorbWeakest().length > 1);
+          if (!a.tieLock) this.autoAdvanceAbsorb();
+        }
+
+        this.state.selected = undefined;
+        if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
+        return true;
+      }
+
+      // ділимо на два додатні; більшу залишаємо на «лівій» гілці від outbound
+      const leftVal = Math.ceil(v / 2);
+      const rightVal = Math.floor(v / 2);
+      const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
+      const { nr: Rr, nc: Rc } = stepFrom(4, 4, rightIdx);
+
+      // акумулятор усіх можливих захоплень під час спліту
+      const captured: Die[] = [];
+      const accumulate = (d: Die) => { captured.push(d); };
+
+      // Перевіряємо обидві клітинки на наявність ворога ЗАЗДАЛЕГІДЬ, щоб звільнити місця
+      const leftOcc = this.getDieAt(Lr, Lc);
+      const rightOcc = this.getDieAt(Rr, Rc);
+      if (leftOcc && leftOcc.color !== die.color) { captured.push(leftOcc); }
+      if (rightOcc && rightOcc.color !== die.color) { captured.push(rightOcc); }
+      if (captured.length) {
+        this.state.dice = this.state.dice.filter(d => !captured.includes(d));
+      }
+
+      // ЛІВИЙ шматок — оновлюємо поточну фішку
+      {
+        if (leftOcc && leftOcc.color === die.color) {
+          if (!this.performBump(Lr, Lc, dirs[leftIdx], { accumulateCapture: accumulate })) return false;
+        }
+        die.row = Lr; die.col = Lc; die.value = leftVal;
+      }
+
+      // ПРАВИЙ шматок — створюємо нову фішку
+      if (rightVal > 0) {
+        if (rightOcc && rightOcc.color === die.color) {
+          if (!this.performBump(Rr, Rc, dirs[rightIdx], { accumulateCapture: accumulate })) return false;
+        }
+        this.state.dice.push({ row: Rr, col: Rc, value: rightVal, color: die.color });
+      }
+
+      // Якщо були будь-які захоплення (без різниці — прямі чи під час бампа), запускаємо ОДНЕ поглинання на суму
+      if (captured.length > 0) {
+        const defender = captured[0].color;
+        const total = captured.reduce((s, d) => s + d.value, 0);
+        this.state.absorb = { defender, remaining: total, captured: total, draft: [], tieLock: false, userChoice: false };
+        const a = this.state.absorb;
+        a.tieLock = (a.remaining > 0) && (this.getAbsorbWeakest().length > 1);
+        if (!a.tieLock) this.autoAdvanceAbsorb();
+      }
+
+      this.state.selected = undefined;
       if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
       return true;
     }
 
-    if (target && target.color !== die.color) {
-      // захоплення → старт поглинання
+    // --- НЕ центр: звичайний рух / бамп / захоплення ---
+    // Визначаємо фактичний напрям (той, чий шлях веде в цю ціль)
+    const dirs = this.getDirectionVectors();
+    const dirUsed = dirs.find(d => {
+      const p = this.getMovePath(die, d); const last = p[p.length - 1];
+      return last?.row === row && last?.col === col;
+    });
+
+    if (target && target.color === die.color && dirUsed) {
+      // бамп по своїх
+      if (!this.performBump(row, col, dirUsed)) return false;
+    } else if (target && target.color !== die.color) {
+      // захоплення (перед пересуванням)
       this.captureDieAt(row, col);
     }
 
-    // звичайне переміщення
+    // переносимо свою фішку в ціль
     die.row = row; die.col = col; this.state.selected = undefined;
     if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
     return true;
   }
 
-  private performBump(row: number, col: number, direction: [number, number]): boolean {
-    // НОВА ЛОГІКА: будуємо ланцюжок бампа як послідовність
-    //   { die, nextRow, nextCol }
-    // де nextRow/nextCol — КОНКРЕТНА наступна клітинка для кожної фішки
-    // (з урахуванням рикошетів і wrap). Потім зсуваємо у зворотному порядку,
-    // переносячи кожну фішку точно у свій nextRow/nextCol — так ми уникаємо
-    // артефактів «вильоту» за межі чи неправильного напрямку після рикошету.
-
+  private performBump(row: number, col: number, direction: [number, number], opts?: { accumulateCapture?: (die: Die) => void }): boolean {
+    // Будуємо ланцюжок бампа як послідовність { die, nextRow, nextCol }
     type BumpLink = { die: Die; nextRow: number; nextCol: number };
     const chain: BumpLink[] = [];
 
@@ -254,14 +382,13 @@ export class GameEngine {
       // wrap по колонках
       if (nextCol < 0) nextCol = 8; else if (nextCol > 8) nextCol = 0;
 
-      // рикошет по верх/низ: інвертуємо вертикальний напрям і ПЕРЕРАХОВУЄМО крок
+      // рикошет по верх/низ: інвертуємо вертикальний напрям і перерахуємо крок
       if (nextRow < 0 || nextRow > 8) {
-        dx = -dx; // інвертуємо вертикальну складову напрямку
+        dx = -dx;
         [stepDr, stepDc] = this.getOffsetStep(dx, dy, isEven);
-        nextRow = curRow + stepDr;
-        nextCol = curCol + stepDc;
+        nextRow = curRow + stepDr; nextCol = curCol + stepDc;
         if (nextCol < 0) nextCol = 8; else if (nextCol > 8) nextCol = 0;
-        if (nextRow < 0 || nextRow > 8) return false; // якщо все одно вилітаємо — забороняємо бамп
+        if (nextRow < 0 || nextRow > 8) return false; // вилітаємо — забороняємо бамп
       }
 
       // не дозволяємо штовхнути когось у центр
@@ -271,20 +398,29 @@ export class GameEngine {
       // фіксуємо фактичний наступний крок для поточної фішки
       chain.push({ die, nextRow, nextCol });
 
-      // якщо далі порожньо — готово, є куди «висунути» крайній елемент
+      // якщо далі порожньо — готово, є куди «висунути» хвіст
       if (!nextDie) break;
 
-      // якщо далі суперник — відбувається захоплення і штовхати більше нікого
-      if (nextDie.color !== die.color) { this.captureDieAt(nextRow, nextCol); break; }
+      // якщо далі суперник — або акумулюємо й видаляємо, або стандартне захоплення
+      if (nextDie.color !== die.color) {
+        if (opts?.accumulateCapture) {
+          opts.accumulateCapture(nextDie);
+          // видаляємо захопленого, щоб звільнити місце
+          this.state.dice = this.state.dice.filter(d => d !== nextDie);
+        } else {
+          this.captureDieAt(nextRow, nextCol);
+        }
+        break;
+      }
 
       // інакше ланцюжок продовжується своєю фішкою
       curRow = nextRow; curCol = nextCol;
     }
 
-    // заборонити, якщо хтось з ланцюжка стоїть у центрі (параноя — хоча вище ми вже не даємо next=центр)
+    // параноя: заборонити, якщо хтось з ланцюжка стоїть у центрі
     if (chain.some(link => link.die.row === 4 && link.die.col === 4)) return false;
 
-    // тепер зсуваємо у ЗВОРОТНОМУ порядку — від «хвоста» до початку
+    // тепер зсуваємо у ЗВОРОТНЬОМУ порядку — від хвоста до голови
     for (let i = chain.length - 1; i >= 0; i--) {
       const link = chain[i];
       link.die.row = link.nextRow;
@@ -316,7 +452,7 @@ export class GameEngine {
         if (nextRow < 0 || nextRow > 8) break;
       }
 
-      if (nextRow === 4 && nextCol === 4) break;
+      if (nextRow === 4 && nextCol === 4) break; // не показуємо ланцюг, що веде в центр
       const nextDie = this.getDieAt(nextRow, nextCol);
       if (!nextDie || nextDie.color !== die.color) break;
       curRow = nextRow; curCol = nextCol;
