@@ -21,6 +21,12 @@ export const COLORS = {
     overlayBg: 'rgba(255,255,255,0.95)',
     overlayBorder: '#ddd',
   },
+  // 🔹 Додано: палітра для режиму TRANSFER
+  transfer: {
+    candidate: '#c7d2fe',             // м’яка фіолетова підсвітка отримувачів
+    overlayBg: 'rgba(255,255,255,0.95)',
+    overlayBorder: '#ddd',
+  },
   path: {
     blue: { hexFill: '#93c5fd55', stroke: '#3b82f6', arrow: '#3b82f6' },
     red:  { hexFill: '#fca5a555', stroke: '#ef4444', arrow: '#ef4444' },

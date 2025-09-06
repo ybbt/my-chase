@@ -1,117 +1,180 @@
 // =============================
 // src/components/HexBoard.tsx
 // =============================
-// Основна сцена: малює дошку 9×9, центрову «фісійну камеру», кістки, підсвічування та
-// маршрути руху. Взаємодіє з GameEngine (стан гри + валідні ходи).
 
 import React, { useState } from 'react';
-import { Die } from './Die';
+import { Die as DieView } from './Die';
 import { GameEngine } from '../game/GameEngine';
 import { COLORS } from '../ui/theme';
 
-// Геометрія гекса у пікселях (SVG)
+// Геометрія гекса (SVG)
 const HEX_SIZE = 30;
-const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE; // горизонтальний крок між стовпцями
-const HEX_HEIGHT = 2 * HEX_SIZE;           // вертикальний діаметр гекса
+const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
+const HEX_HEIGHT = 2 * HEX_SIZE;
 
 function getHexPoints(cx: number, cy: number, size: number): string {
-  // Та сама утиліта, що й у Hex.tsx, але локальна для швидкого рендеру масивів
-  const points = [] as string[];
+  const pts: string[] = [];
   for (let i = 0; i < 6; i++) {
-    const angle_deg = 60 * i - 30;
-    const angle_rad = (Math.PI / 180) * angle_deg;
-    const x = cx + size * Math.cos(angle_rad);
-    const y = cy + size * Math.sin(angle_rad);
-    points.push(`${x},${y}`);
+    const ang = (Math.PI / 180) * (60 * i - 30);
+    pts.push(`${cx + size * Math.cos(ang)},${cy + size * Math.sin(ang)}`);
   }
-  return points.join(' ');
+  return pts.join(' ');
 }
 
-export interface MoveOption {
-  row: number;
-  col: number;
-  bump?: boolean; // чи буде бамп на цій клітинці
-  bumpChain?: { row: number; col: number }[]; // попередній перегляд ланцюжка бампів
-}
+// Локальний UI-режим TRANSFER (вибір пари/напряму/кількості)
+type TransferState = {
+  source: { row: number; col: number };
+  candidates: { row: number; col: number }[];
+  target?: { row: number; col: number };
+  direction?: 'out' | 'in';
+  amount?: number;
+  maxOut?: number;
+  maxIn?: number;
+};
 
 export const HexBoard: React.FC = () => {
-  // ініціалізуємо рушій гри один раз (у стейті)
   const [engine] = useState(() => new GameEngine());
-  const [_, forceUpdate] = useState(0); // хак для форс-рендеру після змін engine.state
-  const state = engine.state;           // поточний стан гри
-  const absorb = state.absorb;          // режим поглинання (якщо є)
+  const [, forceUpdate] = useState(0);
+  const state = engine.state;
+  const absorb = state.absorb;
+  const gameOver = state.gameOver;
 
-  
+  const [transfer, setTransfer] = useState<TransferState | undefined>(undefined);
+  const [suppressOfferKey, setSuppressOfferKey] = useState<string | null>(null);
 
-  // Запитуємо у рушія валідні цілі для обраної кістки (у режимі поглинання рушій поверне [])
+  // Підсумки по кольорах (показ у кутку та в модалці)
+  const sums = (() => {
+    let red = 0, blue = 0;
+    for (const d of state.dice) d.color === 'red' ? red += d.value : blue += d.value;
+    return { red, blue };
+  })();
+
+  // Валідні рухи для підсвітки
   const availableMoves = engine.getAvailableMoves();
 
-  // Для підсвітки бамп-ланцюжків (прозоре накриття клітинок) — показуємо лише якщо НЕ поглинаємо
-  const bumpHighlightCells = !absorb
-    ? availableMoves.reduce((acc, m) => {
-        if (m.bump && m.bumpChain) acc.push(...m.bumpChain);
-        return acc;
-      }, [] as { row: number; col: number }[])
+  // Підсвітка бамп-ланцюжків
+  const bumpHighlightCells = (!absorb && !transfer && !gameOver)
+    ? availableMoves.reduce((acc, m) => { if (m.bump && m.bumpChain) acc.push(...m.bumpChain); return acc; }, [] as {row:number;col:number}[])
     : [];
 
-  // Параметри поля 9×9, центр — (4,4)
-  const rows = 9;
-  const cols = 9;
-  const fissionRow = 4;
-  const fissionCol = 4;
+  const rows = 9, cols = 9;
+  const fissionRow = 4, fissionCol = 4;
 
-  // Кандидати для підвищення в режимі поглинання (тільки поточні «найслабші» < 6)
+  // Найслабші під час absorb
   const weakestSet = absorb ? engine.getAbsorbWeakest() : [];
   const weakestKey = new Set(weakestSet.map(d => `${d.row},${d.col}`));
 
-  // -------------------------------
-  // Обробка кліків по клітинках/кістках
-  // -------------------------------
+  // ----- сусіди (для TRANSFER) -----
+  function getNeighborCells(row: number, col: number): {row:number;col:number}[] {
+    const even = row % 2 === 0;
+    const dirsEven: [number,number][] = [[-1,0],[-1,1],[0,-1],[0,1],[1,0],[1,1]];
+    const dirsOdd:  [number,number][] = [[-1,-1],[-1,0],[0,-1],[0,1],[1,-1],[1,0]];
+    const dirs = even ? dirsEven : dirsOdd;
+    const res: {row:number;col:number}[] = [];
+    for (const [dr, dc] of dirs) {
+      let nr = row + dr, nc = col + dc;
+      if (nc < 0) nc = 8; else if (nc > 8) nc = 0; // wrap
+      if (nr < 0 || nr > 8) continue;
+      res.push({ row: nr, col: nc });
+    }
+    return res;
+  }
+
+  const adjacentAllies: {row:number;col:number}[] = (() => {
+    if (!state.selected) return [];
+    const me = engine.getDieAt(state.selected.row, state.selected.col);
+    if (!me) return [];
+    return getNeighborCells(state.selected.row, state.selected.col)
+      .map(p => engine.getDieAt(p.row, p.col))
+      .filter((d): d is NonNullable<typeof d> => !!d && d.color === me.color)
+      .map(d => ({ row: d.row, col: d.col }));
+  })();
+
+  const selectedKey = state.selected ? `${state.selected.row},${state.selected.col}` : null;
+  const canOfferTransfer = !absorb && !transfer && !gameOver && state.selected && adjacentAllies.length > 0 && (suppressOfferKey !== selectedKey);
+
+  // ----- кліки -----
   const handleHexClick = (row: number, col: number) => {
-    // Якщо йде поглинання — кліки інтерпретуємо як вибір кістки-захисника
+    if (gameOver) return;
+
+    // режим Absorb
     if (state.absorb) {
-      // Якщо все вже розподілено — ігноруємо кліки, просто чекаємо «Готово» або «Скинути»
       if (state.absorb.remaining === 0) return;
-      // Дозволяємо клік лише по «поточній найслабшій» кістці захисника
       const key = `${row},${col}`;
       if (weakestKey.has(key)) {
-        engine.chooseAbsorbAt(row, col); // підняти вибрану й авто-докрутити одиночні
+        engine.chooseAbsorbAt(row, col);
         forceUpdate(n => n + 1);
       }
       return;
     }
 
-    // Звичайний режим
+    // режим Transfer — вибір отримувача
+    if (transfer) {
+      const isCandidate = transfer.candidates.some(p => p.row === row && p.col === col);
+      if (!isCandidate) return;
+
+      const donor = engine.getDieAt(transfer.source.row, transfer.source.col);
+      const recip = engine.getDieAt(row, col);
+      if (!donor || !recip) return;
+
+      const maxOut = Math.min(donor.value - 1, 6 - recip.value); // source -> target
+      const maxIn  = Math.min(recip.value - 1, 6 - donor.value); // target -> source
+
+      let direction: 'out' | 'in' | undefined;
+      if (maxOut > 0) direction = 'out';
+      else if (maxIn > 0) direction = 'in';
+
+      const amount = direction === 'out'
+        ? Math.max(1, Math.min(1, maxOut))
+        : direction === 'in'
+        ? Math.max(1, Math.min(1, maxIn))
+        : 0;
+
+      setTransfer({
+        ...transfer,
+        target: { row, col },
+        direction,
+        amount: amount || 0,
+        maxOut: Math.max(0, maxOut),
+        maxIn: Math.max(0, maxIn),
+      });
+      return;
+    }
+
+    // звичайний режим
     const clickedDie = engine.getDieAt(row, col);
     const isSelected = !!state.selected;
     const isOwnDie = clickedDie?.color === state.currentPlayer;
     const isSameAsSelected = isSelected && state.selected!.row === row && state.selected!.col === col;
 
     if (!isSelected) {
-      if (isOwnDie) engine.selectDie(row, col);
+      if (isOwnDie) {
+        engine.selectDie(row, col);
+        setSuppressOfferKey(null);
+      }
     } else {
-      const available = engine.getAvailableMoves();
-      const isLegalTarget = available.some((p) => p.row === row && p.col === col);
+      const isLegalTarget = availableMoves.some(p => p.row === row && p.col === col);
       if (isOwnDie && !isLegalTarget && !isSameAsSelected) {
         engine.selectDie(row, col);
+        setSuppressOfferKey(null);
       } else {
-        engine.moveSelectedTo(row, col);
+        const moved = engine.moveSelectedTo(row, col);
+        if (moved) {
+          // кінець гри тепер визначає тільки engine.state.gameOver у finalizeAbsorb()
+        }
       }
     }
-    forceUpdate((n) => n + 1);
+    forceUpdate(n => n + 1);
   };
 
-  // Побудова попередніх «шляхів» — підсвічення клітинок, через які
-  // піде обрана кістка у кожному з 6 напрямків (допомагає дивитися траєкторію
-  // з урахуванням рикошетів/обгортань і блокувань іншими кістками). Вимикаємо під час поглинання
-  // ПРАВКА: показуємо шляхи лише для ТИХ напрямків, де кінцева клітинка — ЛЕГАЛЬНА (а не «урвана» перешкодою)
+  // ---- побудова попередніх шляхів (стрілки), вимкнено під час absorb ----
   const paths: { row: number; col: number }[][] = [];
   if (state.selected && !absorb) {
     const selDie = engine.getDieAt(state.selected.row, state.selected.col);
     if (selDie) {
-      const directions = engine.getDirectionVectors();
+      const dirs = engine.getDirectionVectors();
       const legalTargets = new Set(availableMoves.map(m => `${m.row},${m.col}`));
-      for (const dir of directions) {
+      for (const dir of dirs) {
         const path = engine.getMovePath(selDie, dir);
         const last = path[path.length - 1];
         const isComplete = path.length === selDie.value && last && legalTargets.has(`${last.row},${last.col}`);
@@ -120,55 +183,199 @@ export const HexBoard: React.FC = () => {
     }
   }
 
-  // Кольори шляхів: червона фішка — червоні шляхи; синя — сині
   const selectedDie = state.selected ? engine.getDieAt(state.selected.row, state.selected.col) : undefined;
   const pathPalette = selectedDie?.color === 'red' ? COLORS.path.red : COLORS.path.blue;
   const arrowId = selectedDie?.color === 'red' ? 'arrow-red' : 'arrow-blue';
 
-  // Плоский список усіх координат клітинок для рендера
-  const hexes = [] as { row: number; col: number }[];
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) hexes.push({ row, col });
-  }
+  // ----- застосувати TRANSFER (через рушій) -----
+  const applyTransfer = () => {
+    if (!transfer || !transfer.target || !state.selected || !transfer.direction || gameOver) return;
 
-  // -------------------------------
-  // UI Оверлей для режиму поглинання
-  // -------------------------------
-  const Overlay = () => !absorb ? null : (
-    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: COLORS.absorb.overlayBg, border: `1px solid ${COLORS.absorb.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 320, lineHeight: 1.4, wordBreak: 'break-word' }}>
+    const ok = engine.transfer(
+      transfer.source,
+      transfer.target,
+      transfer.direction,
+      Math.max(1, transfer.amount ?? 1),
+    );
+    if (!ok) return;
+
+    setTransfer(undefined);
+    forceUpdate(n => n + 1);
+  };
+
+  // ----- оверлеї -----
+  const OverlayAbsorb = () => !absorb ? null : (
+    <div style={{ position: 'absolute', top: 12, left: 12, padding: 12, background: COLORS.absorb.overlayBg, border: `1px solid ${COLORS.absorb.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 340, lineHeight: 1.4 }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>Поглинання — команда {absorb.defender}</div>
-      {absorb.remaining > 0 && (
-        <div style={{ marginBottom: 8 }}>Залишилось розподілити: <b>{absorb.remaining}</b></div>
-      )}
+      {absorb.remaining > 0 && (<div style={{ marginBottom: 8 }}>Залишилось розподілити: <b>{absorb.remaining}</b></div>)}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => { engine.forceAutoAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining === 0 || (engine.getAbsorbWeakest().length === 0 && absorb.remaining > 0)}>
-          Авто
-        </button>
-        <button onClick={() => { engine.resetAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining === absorb.captured && absorb.draft.length === 0}>
-          Скинути
-        </button>
-        <button onClick={() => { engine.finalizeAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining !== 0 && engine.getAbsorbWeakest().length > 0}>
+        <button onClick={() => { engine.forceAutoAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining === 0 || (engine.getAbsorbWeakest().length === 0 && absorb.remaining > 0)}>Авто</button>
+        <button onClick={() => { engine.resetAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining === absorb.captured && absorb.draft.length === 0}>Скинути</button>
+        <button onClick={() => { engine.finalizeAbsorb(); forceUpdate(n=>n+1); }} disabled={absorb.remaining > 0 && engine.getAbsorbWeakest().length > 0 && !absorb.userChoice}>
           Готово
         </button>
       </div>
-      <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-        {absorb.remaining === 0 ? (
-          <>Розподіл завершено. Натисніть «Готово», щоб підтвердити, або «Скинути», щоб змінити.</>
-        ) : (
-          (() => {
-            const count = engine.getAbsorbWeakest().length;
-            if (count > 1) return <>Є кілька найслабших — оберіть одну.</>;
-            if (count === 0) return <>Немає доступних кісток &lt; 6 — решта {absorb.remaining} не може бути розподілена.</>;
-            return <>Найслабша одна — підвищення відбувається автоматично.</>;
-          })()
-        )}
+      <div style={{ marginTop: 8, fontSize: 12, color: '#555' }}>
+        {
+          absorb.remaining === 0
+            ? <>Розподіл завершено. Натисніть «Готово», щоб підтвердити (хід перейде супернику).</>
+            : (() => {
+                const count = engine.getAbsorbWeakest().length;
+                if (count > 1) return <>Є кілька найслабших — оберіть одну.</>;
+                if (count === 0) return <>Немає доступних кісток &lt; 6 — решта {absorb.remaining} не може бути розподілена.</>;
+                return <>Найслабша одна — підвищення відбувається автоматично.</>;
+              })()
+        }
       </div>
     </div>
   );
 
+  const OverlayTransfer = () => {
+    if (gameOver) return null;
+
+    // 1) Пропозиція почати трансфер
+    if (canOfferTransfer) {
+      return (
+        <div style={{ position: 'absolute', top: 12, right: 12, padding: 12, background: COLORS.transfer.overlayBg, border: `1px solid ${COLORS.transfer.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 380, lineHeight: 1.4 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Трансфер швидкості</div>
+          <div style={{ marginBottom: 10 }}>Поруч є свої кістки. Почати трансфер?</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => { if (!state.selected) return; setTransfer({ source: { ...state.selected }, candidates: adjacentAllies }); }}>Почати</button>
+            <button onClick={() => setSuppressOfferKey(selectedKey)}>Скасувати</button>
+          </div>
+        </div>
+      );
+    }
+
+    // 2) Активний режим, але без вибраного отримувача
+    if (transfer && !transfer.target) {
+      const donor = engine.getDieAt(transfer.source.row, transfer.source.col);
+      return (
+        <div style={{ position: 'absolute', top: 12, right: 12, padding: 12, background: COLORS.transfer.overlayBg, border: `1px solid ${COLORS.transfer.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 420, lineHeight: 1.4 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Трансфер активний</div>
+          <div style={{ marginBottom: 10 }}>Оберіть суміжну свою кістку-отримувача (підсвічено на полі).</div>
+          <div style={{ fontSize: 12, color: '#555' }}>
+            Обрано: <b>{transfer.source.row},{transfer.source.col}</b> (= {donor?.value ?? '?'})
+          </div>
+          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+            <button onClick={() => setTransfer(undefined)}>Вийти</button>
+          </div>
+        </div>
+      );
+    }
+
+    // 3) Є пара — вибір напряму та кількості
+    if (transfer && transfer.target) {
+      const src = engine.getDieAt(transfer.source.row, transfer.source.col);
+      const trg = engine.getDieAt(transfer.target.row, transfer.target.col);
+      const srcVal = src?.value ?? 0;
+      const trgVal = trg?.value ?? 0;
+      const maxOut = Math.max(0, Math.min(srcVal - 1, 6 - trgVal)); // source → target
+      const maxIn  = Math.max(0, Math.min(trgVal - 1, 6 - srcVal)); // target → source
+      const activeMax = transfer.direction === 'out' ? maxOut : transfer.direction === 'in' ? maxIn : 0;
+      const amount = Math.min(Math.max(transfer.amount ?? 1, 1), Math.max(activeMax, 1));
+      const disableConfirm = activeMax <= 0;
+
+      const setDir = (dir: 'out' | 'in') => {
+        const newMax = dir === 'out' ? maxOut : maxIn;
+        setTransfer({ ...transfer, direction: dir, amount: newMax > 0 ? Math.min(transfer.amount ?? 1, newMax) || 1 : 0, maxOut, maxIn });
+      };
+
+      return (
+        <div style={{ position: 'absolute', top: 12, right: 12, padding: 12, background: COLORS.transfer.overlayBg, border: `1px solid ${COLORS.transfer.overlayBorder}`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: 460, lineHeight: 1.4 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Підтвердити трансфер</div>
+
+          <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+            <div>
+              Пара: <b>{transfer.source.row},{transfer.source.col}</b> (={srcVal}) ↔ <b>{transfer.target.row},{transfer.target.col}</b> (={trgVal})
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button onClick={() => setDir('out')} disabled={maxOut <= 0} style={{ fontWeight: transfer.direction === 'out' ? 700 : 400 }} title={maxOut > 0 ? `Макс ${maxOut}` : 'Немає можливого переказу'}>
+                {`${transfer.source.row},${transfer.source.col} → ${transfer.target.row},${transfer.target.col}`}
+              </button>
+              <button onClick={() => setDir('in')} disabled={maxIn <= 0} style={{ fontWeight: transfer.direction === 'in' ? 700 : 400 }} title={maxIn > 0 ? `Макс ${maxIn}` : 'Немає можливого переказу'}>
+                {`${transfer.source.row},${transfer.source.col} ← ${transfer.target.row},${transfer.target.col}`}
+              </button>
+              <span style={{ fontSize: 12, color: '#666' }}>
+                {transfer.direction === 'out' ? `Макс: ${maxOut}` : transfer.direction === 'in' ? `Макс: ${maxIn}` : 'Оберіть напрям'}
+              </span>
+            </div>
+
+            {activeMax <= 0 ? (
+              <div style={{ color: '#b91c1c' }}>
+                Не можна передати в обраному напрямі (донор має лишити ≥1, одержувач не може стати &gt;6).
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => setTransfer({ ...transfer, amount: Math.max(1, amount - 1) })}>−</button>
+                <input
+                  type="number"
+                  min={1}
+                  max={activeMax}
+                  value={amount}
+                  onChange={e => {
+                    const v = parseInt(e.target.value || '1', 10);
+                    const nv = isNaN(v) ? 1 : Math.min(Math.max(v, 1), activeMax);
+                    setTransfer({ ...transfer, amount: nv });
+                  }}
+                  style={{ width: 64, textAlign: 'center' }}
+                />
+                <button onClick={() => setTransfer({ ...transfer, amount: Math.min(activeMax, amount + 1) })}>+</button>
+                <span style={{ fontSize: 12, color: '#666' }}>макс: {activeMax}</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => setTransfer({ source: transfer.source, candidates: transfer.candidates })}>
+              Змінити отримувача
+            </button>
+            <button onClick={() => setTransfer(undefined)}>Вийти</button>
+            <button onClick={applyTransfer} disabled={disableConfirm}>
+              Підтвердити
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const OverlayGameOver = () => {
+    if (!gameOver) return null;
+
+    const loser = gameOver.loser;
+    const winnerText = loser === 'red' ? 'Переможець: СИНІ' : 'Переможець: ЧЕРВОНІ';
+
+    const resetGame = () => {
+      const fresh = new GameEngine();
+      (engine as any).state = fresh.state; // "мʼякий" reset
+      setTransfer(undefined);
+      setSuppressOfferKey(null);
+      forceUpdate(n => n + 1);
+    };
+
+    return (
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
+        <div style={{ background: 'white', padding: 20, borderRadius: 10, minWidth: 320, boxShadow: '0 10px 30px rgba(0,0,0,0.35)' }}>
+          <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 8 }}>Гра завершена</div>
+          <div style={{ marginBottom: 6 }}>{winnerText}</div>
+          <div style={{ marginBottom: 16, fontSize: 14, color: '#555' }}>Суми — Червоні: <b>{sums.red}</b>, Сині: <b>{sums.blue}</b></div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={resetGame}>OK</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <Overlay />
+      <OverlayAbsorb />
+      <OverlayTransfer />
+      <OverlayGameOver />
+
       <svg width="100%" height="100%" viewBox="-50 -50 800 800">
         <defs>
           <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse">
@@ -178,63 +385,63 @@ export const HexBoard: React.FC = () => {
             <path d="M0,0 L10,5 L0,10 Z" fill={COLORS.path.red.arrow} />
           </marker>
         </defs>
-        {/* Рендер сітки гексів з підсвіткою */}
-        {hexes.map(({ row, col }) => {
-          const isEvenRow = row % 2 === 0; // зсув парних рядків
-          const cx = col * HEX_WIDTH + (isEvenRow ? HEX_WIDTH / 2 : 0);
-          const cy = row * HEX_HEIGHT * 0.75; // вертикальний крок 3/4 діаметра
 
-          const isCenter = row === fissionRow && col === fissionCol; // фісійна камера
-          const isSelected = !absorb && state.selected?.row === row && state.selected?.col === col;
+        {/* Сітка гексів */}
+        {(() => {
+          const hexes: { row: number; col: number }[] = [];
+          for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) hexes.push({ row, col });
+          return hexes.map(({ row, col }) => {
+            const isEvenRow = row % 2 === 0;
+            const cx = col * HEX_WIDTH + (isEvenRow ? HEX_WIDTH / 2 : 0);
+            const cy = row * HEX_HEIGHT * 0.75;
 
-          const move = !absorb ? availableMoves.find(p => p.row === row && p.col === col) : undefined;
-          const isAvailable = !!move;     // чи можна закінчити хід тут
-          const isBump = move?.bump;      // чи це бамп-плитка
-          const endDie = !absorb ? engine.getDieAt(row, col) : undefined; // хто зараз стоїть у цілі
-          const isCapture = isAvailable && !isBump && !!endDie && endDie.color !== state.currentPlayer; // взяття?
+            const isCenter = row === fissionRow && col === fissionCol;
+            const isSelected = !absorb && state.selected?.row === row && state.selected?.col === col;
 
-          // Якщо йде поглинання — підсвічуємо лише поточних «найслабших» захисника
-          let fill: string = isCenter ? COLORS.board.center : COLORS.board.cell;
-          let strokeClr: string = COLORS.board.border;
-          let strokeW = 1;
-          if (!absorb) {
-            if (isAvailable) {
-              if (isBump) {
-                fill = COLORS.move.bumpFill;
-              } else if (isCapture) {
-                // Інтенсивніша підсвітка взяття + червона обводка
-                fill = COLORS.move.captureFill;        // red-400
-                strokeClr = COLORS.move.captureStroke;   // red-500
-                strokeW = 1.5;
-              } else {
-                fill = COLORS.move.emptyFill;
+            const move = (!absorb && !transfer && !gameOver) ? availableMoves.find(p => p.row === row && p.col === col) : undefined;
+            const isAvailable = !!move;
+            const isBump = move?.bump;
+            const endDie = (!absorb && !transfer && !gameOver) ? engine.getDieAt(row, col) : undefined;
+            const isCapture = isAvailable && !isBump && !!endDie && endDie.color !== state.currentPlayer;
+
+            let fill: string = isCenter ? COLORS.board.center : COLORS.board.cell;
+            let strokeClr: string = COLORS.board.border;
+            let strokeW = 1;
+
+            if (transfer && !gameOver) {
+              const isCandidate = transfer.candidates.some(p => p.row === row && p.col === col);
+              const isSource = transfer.source.row === row && transfer.source.col === col;
+              if (isCandidate) fill = COLORS.transfer.candidate;
+              if (isSource) strokeW = 2;
+            } else if (!absorb) {
+              if (isAvailable) {
+                if (isBump) fill = COLORS.move.bumpFill;
+                else if (isCapture) { fill = COLORS.move.captureFill; strokeClr = COLORS.move.captureStroke; strokeW = 1.5; }
+                else fill = COLORS.move.emptyFill;
               }
+              if (isSelected) fill = COLORS.move.selected;
+            } else {
+              if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = COLORS.absorb.candidate;
             }
-            if (isSelected) fill = COLORS.move.selected;
-          } else {
-            if (absorb.remaining > 0 && weakestKey.has(`${row},${col}`)) fill = COLORS.absorb.candidate; // зелена підсвітка кандидата лише коли ще є бали
-          }
 
-          if (isCenter) {
-            strokeW = 5;
-            strokeClr = COLORS.board.border;
-          }
+            if (isCenter) { strokeW = 5; strokeClr = COLORS.board.border; }
 
-          return (
-            <polygon
-              key={`hex-${row}-${col}`}
-              points={getHexPoints(cx, cy, HEX_SIZE)}
-              fill={fill}
-              stroke={strokeClr}
-              strokeWidth={strokeW}
-              onClick={() => handleHexClick(row, col)}
-              style={{ cursor: 'pointer' }}
-            />
-          );
-        })}
+            return (
+              <polygon
+                key={`hex-${row}-${col}`}
+                points={getHexPoints(cx, cy, HEX_SIZE)}
+                fill={fill}
+                stroke={strokeClr}
+                strokeWidth={strokeW}
+                onClick={() => handleHexClick(row, col)}
+                style={{ cursor: gameOver ? 'default' : 'pointer' }}
+              />
+            );
+          });
+        })()}
 
-        {/* напівпрозора підсвітка клітинок, через які пройде ланцюжок бампів (лише поза поглинанням) */}
-        {!absorb && bumpHighlightCells.map((cell, i) => {
+        {/* Півпрозора підсвітка бамп-ланцюжків */}
+        {!absorb && !transfer && !gameOver && bumpHighlightCells.map((cell, i) => {
           const isEven = cell.row % 2 === 0;
           const cx = cell.col * HEX_WIDTH + (isEven ? HEX_WIDTH / 2 : 0);
           const cy = cell.row * HEX_HEIGHT * 0.75;
@@ -250,80 +457,53 @@ export const HexBoard: React.FC = () => {
           );
         })}
 
-        {/* Попередні шляхи (маршрути) обраної кістки у всіх 6 напрямках (вимкнено під час поглинання) */}
-        {!absorb && paths.map((path, i) =>
-          path.map((cell, j) => {
-            const isEvenPathRow = cell.row % 2 === 0;
-            const cx = cell.col * HEX_WIDTH + (isEvenPathRow ? HEX_WIDTH / 2 : 0);
-            const cy = cell.row * HEX_HEIGHT * 0.75;
-            return (
-              <polygon
-                key={`path-${i}-${j}`}
-                points={getHexPoints(cx, cy, HEX_SIZE)}
-                fill={pathPalette.hexFill}
-                stroke={pathPalette.stroke}
-                strokeWidth={0.5}
-                style={{ pointerEvents: 'none' }}
-              />
-            );
-          })
-        )}
+        {/* Попередні шляхи/стрілки */}
+        {!absorb && !transfer && !gameOver && paths.map((path, i) => {
+          if (path.length === 0) return null;
+          const first = path[0];
+          const isEvenStart = (state.selected!.row % 2) === 0;
+          const sx = state.selected!.col * HEX_WIDTH + (isEvenStart ? HEX_WIDTH / 2 : 0);
+          const sy = state.selected!.row * HEX_HEIGHT * 0.75;
 
-        {/* Лінія через центри гексів уздовж кожного валідного шляху */}
-        {!absorb && paths.map((path, i) => {
-          if (!selectedDie) return null;
-          // Стартова точка — центр обраної фішки
-          const isEven0 = selectedDie.row % 2 === 0;
-          const sx = selectedDie.col * HEX_WIDTH + (isEven0 ? HEX_WIDTH / 2 : 0);
-          const sy = selectedDie.row * HEX_HEIGHT * 0.75;
-
-          // Розіб'ємо лінію на дві частини, якщо є wrap по горизонталі:
-          // до краю (pre) і від протилежного краю (post)
           const pre: string[] = [`${sx},${sy}`];
           const post: string[] = [];
           let wrapped = false;
-          let prevCol = selectedDie.col;
+          let prevCol = state.selected!.col;
           let prevX = sx, prevY = sy;
 
-          for (let k = 0; k < path.length; k++) {
-            const cell = path[k];
+          for (let j = 0; j < path.length; j++) {
+            const cell = path[j];
             const isEven = cell.row % 2 === 0;
             const cx = cell.col * HEX_WIDTH + (isEven ? HEX_WIDTH / 2 : 0);
             const cy = cell.row * HEX_HEIGHT * 0.75;
 
-            // wrap детектуємо за стрибком стовпця > 1 (0↔8)
             const delta = Math.abs(cell.col - prevCol);
             if (!wrapped && delta > 1) {
               wrapped = true;
-              // напрямок wrap: вправо (8→0) чи вліво (0→8)
+
               const movingRight = (prevCol === 8 && cell.col === 0)
                 ? true
                 : (prevCol === 0 && cell.col === 8)
                 ? false
                 : (cell.col > prevCol);
 
-              // «Розмотуємо» координату наступного центру по X, щоб отримати локальний вектор руху
               const boardW = cols * HEX_WIDTH;
               const nextAdjX = movingRight ? (cx + boardW) : (cx - boardW);
               const nextAdjY = cy;
 
-              // Одиничний вектор напрямку від попереднього центру до «розмотаного» наступного
               const vx = nextAdjX - prevX; const vy = nextAdjY - prevY;
               const vlen = Math.hypot(vx, vy) || 1;
               const ux = vx / vlen; const uy = vy / vlen;
 
-              // Точка виходу до краю попереднього гекса (на пів HEX_WIDTH у напрямку руху)
               const preEdgeX = prevX + ux * (HEX_WIDTH / 2);
               const preEdgeY = prevY + uy * (HEX_WIDTH / 2);
               pre.push(`${preEdgeX},${preEdgeY}`);
 
-              // Точка входу з протилежного краю наступного гекса (дзеркально)
               const postEdgeAdjX = nextAdjX - ux * (HEX_WIDTH / 2);
               const postEdgeAdjY = nextAdjY - uy * (HEX_WIDTH / 2);
               const postEdgeX = movingRight ? (postEdgeAdjX - boardW) : (postEdgeAdjX + boardW);
               const postEdgeY = postEdgeAdjY;
               post.push(`${postEdgeX},${postEdgeY}`);
-              // Додаємо сам центр цієї клітинки
               post.push(`${cx},${cy}`);
             } else {
               if (wrapped) post.push(`${cx},${cy}`); else pre.push(`${cx},${cy}`);
@@ -332,12 +512,10 @@ export const HexBoard: React.FC = () => {
           }
 
           if (!wrapped) {
-            // Без wrap — одна суцільна лінія з маркером на фініші
-            const pts = pre.join(' ');
             return (
               <polyline
                 key={`pline-${i}`}
-                points={pts}
+                points={pre.join(' ')}
                 fill="none"
                 stroke={pathPalette.stroke}
                 strokeWidth={2}
@@ -350,11 +528,9 @@ export const HexBoard: React.FC = () => {
             );
           }
 
-          // Є wrap — малюємо ДВІ лінії: до краю і від протилежного краю
           return (
-            <>
+            <React.Fragment key={`pline-${i}`}>
               <polyline
-                key={`pline-${i}-pre`}
                 points={pre.join(' ')}
                 fill="none"
                 stroke={pathPalette.stroke}
@@ -362,11 +538,10 @@ export const HexBoard: React.FC = () => {
                 strokeOpacity={0.9}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeDasharray={'6 6'}
+                strokeDasharray="6 6"
                 style={{ pointerEvents: 'none' }}
               />
               <polyline
-                key={`pline-${i}-post`}
                 points={post.join(' ')}
                 fill="none"
                 stroke={pathPalette.stroke}
@@ -374,32 +549,37 @@ export const HexBoard: React.FC = () => {
                 strokeOpacity={0.9}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeDasharray={'6 6'}
+                strokeDasharray="6 6"
                 markerEnd={`url(#${arrowId})`}
                 style={{ pointerEvents: 'none' }}
               />
-            </>
+            </React.Fragment>
           );
         })}
 
-        {/* Рендер кісток поверх клітинок */}
-        {state.dice.map((die, index) => {
+        {/* Кістки */}
+        {state.dice.map((die, i) => {
           const isEvenRow = die.row % 2 === 0;
           const cx = die.col * HEX_WIDTH + (isEvenRow ? HEX_WIDTH / 2 : 0);
           const cy = die.row * HEX_HEIGHT * 0.75;
-
+          const displayValue = die.value + (absorb && die.color === absorb.defender ? engine.getAbsorbAddedFor(die) : 0);
           return (
-            <Die
-              key={`die-${index}`}
+            <DieView
+              key={`die-${i}`}
               cx={cx}
               cy={cy}
-              value={die.value + (absorb && die.color === absorb.defender ? engine.getAbsorbAddedFor(die) : 0)}
+              value={displayValue}
               color={die.color}
               onClick={() => handleHexClick(die.row, die.col)}
             />
           );
         })}
       </svg>
+
+      {/* маленький індикатор сум (зручно для тесту) */}
+      <div style={{ position: 'absolute', bottom: 8, left: 12, padding: '4px 8px', background: 'rgba(255,255,255,0.8)', borderRadius: 6, fontSize: 12 }}>
+        Σ Red: <b>{sums.red}</b> | Σ Blue: <b>{sums.blue}</b>
+      </div>
     </div>
   );
 };
