@@ -1,4 +1,4 @@
-import { GameEngine } from '../src/game/GameEngine';
+import { GameEngine } from '../shared/engine/GameEngine';
 import { newEngine, add, sel, mv, at, count, dirs, findMove } from './testUtils';
 
 /**

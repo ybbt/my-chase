@@ -1,5 +1,5 @@
 // =============================
-// src/game/GameEngine.ts
+// shared/engine/GameEngine.ts
 // =============================
 
 export type Player = 'red' | 'blue';
@@ -57,17 +57,17 @@ export class GameEngine {
   }
 
   // ---------- Базові утиліти ----------
-  getDieAt(row: number, col: number): Die | undefined {
+  public getDieAt(row: number, col: number): Die | undefined {
     return this.state.dice.find(d => d.row === row && d.col === col);
   }
 
-  selectDie(row: number, col: number) {
+  public selectDie(row: number, col: number) {
     const die = this.getDieAt(row, col);
     if (die && die.color === this.state.currentPlayer) this.state.selected = { row, col };
     else this.state.selected = undefined;
   }
 
-  togglePlayer() {
+  private togglePlayer() {
     this.state.currentPlayer = this.state.currentPlayer === 'red' ? 'blue' : 'red';
   }
 
@@ -77,7 +77,7 @@ export class GameEngine {
 
   public isGameOver(): boolean { return !!this.state.gameOver; }
 
-  getDirectionVectors(): [number, number][] {
+  public getDirectionVectors(): [number, number][] {
     // 0..5: NW, NE, W, E, SW, SE
     return [
       [-1, 0], // 0: NW
@@ -106,7 +106,7 @@ export class GameEngine {
   }
 
   // ---------- Валідні цілі (унікальні по клітинці; беремо варіант із мін. рикошетів) ----------
-  getAvailableMoves(): MoveOption[] {
+  public getAvailableMoves(): MoveOption[] {
     if (this.state.absorb || this.state.gameOver) return [];
     const sel = this.state.selected; if (!sel) return [];
     const die = this.getDieAt(sel.row, sel.col); if (!die) return [];
@@ -171,7 +171,7 @@ export class GameEngine {
     return Array.from(best.values());
   }
 
-  getMovePath(die: Die, dir: [number, number]): { row: number; col: number }[] {
+  public getMovePath(die: Die, dir: [number, number]): { row: number; col: number }[] {
     const path: { row: number; col: number }[] = [];
     let { row, col } = die;
     let dr = dir[0], dc = dir[1];
@@ -205,89 +205,131 @@ export class GameEngine {
   }
 
   // ---------- Рух (включно зі сплітом) ----------
-  // у GameEngine.ts
-moveSelectedTo(row: number, col: number): boolean {
-  if (this.state.absorb || this.state.gameOver) return false;
-  const sel = this.state.selected; if (!sel) return false;
-  const die = this.getDieAt(sel.row, sel.col); if (!die) return false;
+  public moveSelectedTo(row: number, col: number): boolean {
+    if (this.state.absorb || this.state.gameOver) return false;
+    const sel = this.state.selected; if (!sel) return false;
+    const die = this.getDieAt(sel.row, sel.col); if (!die) return false;
 
-  // Ціль має бути серед валідних (беремо обраний із мін. рикошетів)
-  const options = this.getAvailableMoves();
-  const chosen = options.find(p => p.row === row && p.col === col);
-  if (!chosen) return false;
+    // Ціль має бути серед валідних (беремо обраний із мін. рикошетів)
+    const options = this.getAvailableMoves();
+    const chosen = options.find(p => p.row === row && p.col === col);
+    if (!chosen) return false;
 
-  const dirs = this.getDirectionVectors();
-  const dirUsed: [number, number] = dirs[chosen.dirIdx];
+    const dirs = this.getDirectionVectors();
+    const dirUsed: [number, number] = dirs[chosen.dirIdx];
 
-  const prevPlayer = this.state.currentPlayer;
+    const prevPlayer = this.state.currentPlayer;
 
-  // === СПЛІТ у фіссійній камері ===
-  if (row === 4 && col === 4) {
-    const allDirs = this.getDirectionVectors();
+    // === СПЛІТ у фіссійній камері ===
+    if (row === 4 && col === 4) {
+      const allDirs = this.getDirectionVectors();
 
-    // 1) Знайти фактичний напрям останнього кроку в центр (entryIdx)
-    let entryIdx = -1;
-    let prevCell: { row: number; col: number } | undefined;
-    for (let i = 0; i < allDirs.length; i++) {
-      const p = this.getMovePath(die, allDirs[i]);
-      if (p.length && p[p.length - 1].row === 4 && p[p.length - 1].col === 4) {
-        prevCell = p.length >= 2 ? p[p.length - 2] : { row: die.row, col: die.col };
-        break;
+      // 1) Знайти фактичний напрям останнього кроку в центр (entryIdx)
+      let entryIdx = -1;
+      let prevCell: { row: number; col: number } | undefined;
+      for (let i = 0; i < allDirs.length; i++) {
+        const p = this.getMovePath(die, allDirs[i]);
+        if (p.length && p[p.length - 1].row === 4 && p[p.length - 1].col === 4) {
+          prevCell = p.length >= 2 ? p[p.length - 2] : { row: die.row, col: die.col };
+          break;
+        }
       }
-    }
-    if (!prevCell) return false;
+      if (!prevCell) return false;
 
-    for (let i = 0; i < allDirs.length; i++) {
-      const [dr, dc] = allDirs[i];
-      const isEven = prevCell.row % 2 === 0;
-      const [sr, sc] = this.getOffsetStep(dr, dc, isEven);
-      let nr = prevCell.row + sr, nc = prevCell.col + sc;
-      if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
-      if (nr === 4 && nc === 4) { entryIdx = i; break; }
-    }
-    if (entryIdx === -1) return false;
+      for (let i = 0; i < allDirs.length; i++) {
+        const [dr, dc] = allDirs[i];
+        const isEven = prevCell.row % 2 === 0;
+        const [sr, sc] = this.getOffsetStep(dr, dc, isEven);
+        let nr = prevCell.row + sr, nc = prevCell.col + sc;
+        if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
+        if (nr === 4 && nc === 4) { entryIdx = i; break; }
+      }
+      if (entryIdx === -1) return false;
 
-    // 2) Працюємо на кільці напрямів годинниково: [E, SE, SW, W, NW, NE]
-    const ring: number[] = [3, 5, 4, 2, 0, 1];
-    const entryPos = ring.indexOf(entryIdx);
-    if (entryPos === -1) return false;
+      // 2) Працюємо на кільці напрямів годинниково: [E, SE, SW, W, NW, NE]
+      const ring: number[] = [3, 5, 4, 2, 0, 1];
+      const entryPos = ring.indexOf(entryIdx);
+      if (entryPos === -1) return false;
 
-    // 3) Протилежний (outbound) і "ліворуч/праворуч" від нього
-    const outPos = (entryPos + 3) % 6;
-    const leftIdx  = ring[(outPos + 1) % 6]; // більша частина
-    const rightIdx = ring[(outPos + 5) % 6];
+      // 3) Протилежний (outbound) і "ліворуч/праворуч" від нього
+      const outPos = (entryPos + 3) % 6;
+      const leftIdx  = ring[(outPos + 1) % 6]; // більша частина
+      const rightIdx = ring[(outPos + 5) % 6];
 
-    // 4) Один крок із центру в обраний напрям (з урахуванням wrap/парності)
-    const stepFrom = (r: number, c: number, dirIdx: number) => {
-      const [dr, dc] = allDirs[dirIdx];
-      const isEven = r % 2 === 0;
-      let [sr, sc] = this.getOffsetStep(dr, dc, isEven);
-      let nr = r + sr, nc = c + sc;
-      if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
-      if (nr < 0) nr = 0; else if (nr > 8) nr = 8;
-      return { nr, nc };
-    };
+      // 4) Один крок із центру в обраний напрям (з урахуванням wrap/парності)
+      const stepFrom = (r: number, c: number, dirIdx: number) => {
+        const [dr, dc] = allDirs[dirIdx];
+        const isEven = r % 2 === 0;
+        let [sr, sc] = this.getOffsetStep(dr, dc, isEven);
+        let nr = r + sr, nc = c + sc;
+        if (nc < 0) nc = 8; else if (nc > 8) nc = 0;
+        if (nr < 0) nr = 0; else if (nr > 8) nr = 8;
+        return { nr, nc };
+      };
 
-    const v = die.value;
+      const v = die.value;
 
-    // --- Ліміт 10 фішок: якщо вже 10 або v===1 — вихід однією "назад-вліво" ---
-    const teamCount = this.countTeamDice(die.color);
-    if (v === 1 || teamCount >= 10) {
+      // --- Ліміт 10 фішок: якщо вже 10 або v===1 — вихід однією "назад-вліво" ---
+      const teamCount = this.countTeamDice(die.color);
+      if (v === 1 || teamCount >= 10) {
+        const captured: Die[] = [];
+        const accumulate = (d: Die) => { captured.push(d); };
+
+        const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
+        const occ = this.getDieAt(Lr, Lc);
+        if (occ) {
+          if (occ.color === die.color) {
+            if (!this.performBump(Lr, Lc, allDirs[leftIdx], { accumulateCapture: accumulate })) return false;
+          } else {
+            captured.push(occ);
+            this.state.dice = this.state.dice.filter(d => d !== occ);
+          }
+        }
+
+        die.row = Lr; die.col = Lc; // value лишається v як був
+
+        if (captured.length > 0) {
+          const defender = captured[0].color;
+          const total = captured.reduce((s, d) => s + d.value, 0);
+          this.state.absorb = { defender, remaining: total, captured: total, draft: [], tieLock: false, userChoice: false };
+          const a = this.state.absorb!;
+          a.tieLock = (a.remaining > 0) && (this.getAbsorbWeakest().length > 1);
+          if (!a.tieLock) this.autoAdvanceAbsorb();
+        }
+
+        this.state.selected = undefined;
+        if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
+        return true;
+      }
+
+      // --- Нормальний спліт на дві додатні частини ---
+      const leftVal  = Math.ceil(v / 2);
+      const rightVal = Math.floor(v / 2);
+      const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
+      const { nr: Rr, nc: Rc } = stepFrom(4, 4, rightIdx);
+
       const captured: Die[] = [];
       const accumulate = (d: Die) => { captured.push(d); };
 
-      const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
-      const occ = this.getDieAt(Lr, Lc);
-      if (occ) {
-        if (occ.color === die.color) {
-          if (!this.performBump(Lr, Lc, allDirs[leftIdx], { accumulateCapture: accumulate })) return false;
-        } else {
-          captured.push(occ);
-          this.state.dice = this.state.dice.filter(d => d !== occ);
-        }
+      const leftOcc  = this.getDieAt(Lr, Lc);
+      const rightOcc = this.getDieAt(Rr, Rc);
+      if (leftOcc  && leftOcc.color  !== die.color) captured.push(leftOcc);
+      if (rightOcc && rightOcc.color !== die.color) captured.push(rightOcc);
+      if (captured.length) {
+        this.state.dice = this.state.dice.filter(d => !captured.includes(d));
       }
 
-      die.row = Lr; die.col = Lc; // value лишається v як був
+      if (leftOcc && leftOcc.color === die.color) {
+        if (!this.performBump(Lr, Lc, allDirs[leftIdx], { accumulateCapture: accumulate })) return false;
+      }
+      die.row = Lr; die.col = Lc; die.value = leftVal;
+
+      if (rightVal > 0) {
+        if (rightOcc && rightOcc.color === die.color) {
+          if (!this.performBump(Rr, Rc, allDirs[rightIdx], { accumulateCapture: accumulate })) return false;
+        }
+        this.state.dice.push({ row: Rr, col: Rc, value: rightVal, color: die.color });
+      }
 
       if (captured.length > 0) {
         const defender = captured[0].color;
@@ -303,63 +345,19 @@ moveSelectedTo(row: number, col: number): boolean {
       return true;
     }
 
-    // --- Нормальний спліт на дві додатні частини ---
-    const leftVal  = Math.ceil(v / 2);
-    const rightVal = Math.floor(v / 2);
-    const { nr: Lr, nc: Lc } = stepFrom(4, 4, leftIdx);
-    const { nr: Rr, nc: Rc } = stepFrom(4, 4, rightIdx);
+    // --- НЕ центр: звичайний рух / бамп / захоплення ---
+    const target = this.getDieAt(row, col);
 
-    const captured: Die[] = [];
-    const accumulate = (d: Die) => { captured.push(d); };
-
-    const leftOcc  = this.getDieAt(Lr, Lc);
-    const rightOcc = this.getDieAt(Rr, Rc);
-    if (leftOcc  && leftOcc.color  !== die.color) captured.push(leftOcc);
-    if (rightOcc && rightOcc.color !== die.color) captured.push(rightOcc);
-    if (captured.length) {
-      this.state.dice = this.state.dice.filter(d => !captured.includes(d));
+    if (target && target.color === die.color) {
+      if (!this.performBump(row, col, dirUsed)) return false;
+    } else if (target && target.color !== die.color) {
+      this.captureDieAt(row, col);
     }
 
-    if (leftOcc && leftOcc.color === die.color) {
-      if (!this.performBump(Lr, Lc, allDirs[leftIdx], { accumulateCapture: accumulate })) return false;
-    }
-    die.row = Lr; die.col = Lc; die.value = leftVal;
-
-    if (rightVal > 0) {
-      if (rightOcc && rightOcc.color === die.color) {
-        if (!this.performBump(Rr, Rc, allDirs[rightIdx], { accumulateCapture: accumulate })) return false;
-      }
-      this.state.dice.push({ row: Rr, col: Rc, value: rightVal, color: die.color });
-    }
-
-    if (captured.length > 0) {
-      const defender = captured[0].color;
-      const total = captured.reduce((s, d) => s + d.value, 0);
-      this.state.absorb = { defender, remaining: total, captured: total, draft: [], tieLock: false, userChoice: false };
-      const a = this.state.absorb!;
-      a.tieLock = (a.remaining > 0) && (this.getAbsorbWeakest().length > 1);
-      if (!a.tieLock) this.autoAdvanceAbsorb();
-    }
-
-    this.state.selected = undefined;
+    die.row = row; die.col = col; this.state.selected = undefined;
     if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
     return true;
   }
-
-  // --- НЕ центр: звичайний рух / бамп / захоплення ---
-  const target = this.getDieAt(row, col); // <-- єдине оголошення
-
-  if (target && target.color === die.color) {
-    if (!this.performBump(row, col, dirUsed)) return false;
-  } else if (target && target.color !== die.color) {
-    this.captureDieAt(row, col);
-  }
-
-  die.row = row; die.col = col; this.state.selected = undefined;
-  if (!this.state.absorb && this.state.currentPlayer === prevPlayer) this.togglePlayer();
-  return true;
-}
-
 
   // ---------- Бамп (wrap→ricochet, заборона в центр, обертання кільця) ----------
   private performBump(row: number, col: number, direction: [number, number], opts?: { accumulateCapture?: (die: Die) => void }): boolean {
@@ -476,7 +474,7 @@ moveSelectedTo(row: number, col: number): boolean {
 
   private getAbsorbAdded(die: Die): number {
     const a = this.state.absorb; if (!a) return 0;
-    const entry = a.draft.find(e => e.die === die);
+    const entry = a.draft.find(e => e.die.row === die.row && e.die.col === die.col);
     return entry ? entry.added : 0;
   }
   public getAbsorbAddedFor(die: Die): number { return this.getAbsorbAdded(die); }
@@ -497,7 +495,7 @@ moveSelectedTo(row: number, col: number): boolean {
     const die = this.getDieAt(row, col);
     if (!die || die.color !== a.defender) return false;
     const weakest = this.getAbsorbWeakest();
-    if (!weakest.some(w => w === die)) return false;
+    if (!weakest.some(w => w.row === die.row && w.col === die.col)) return false;
     a.userChoice = true; // був явний вибір
     a.tieLock = false;
     this.bumpAbsorbDie(die);
@@ -565,7 +563,7 @@ moveSelectedTo(row: number, col: number): boolean {
     const cur = this.getCurrentValue(die);
     if (cur >= 6 || a.remaining <= 0) return;
     const give = Math.min(6 - cur, a.remaining);
-    const entry = a.draft.find(e => e.die === die);
+    const entry = a.draft.find(e => e.die.row === die.row && e.die.col === die.col);
     if (entry) entry.added += give; else a.draft.push({ die, added: give });
     a.remaining -= give;
     if (a.remaining === 0) { a.tieLock = false; return; }
@@ -584,8 +582,8 @@ moveSelectedTo(row: number, col: number): boolean {
 
     // вертикальні сусіди з урахуванням парності та wrap по колонках
     const even = r1 % 2 === 0;
-    const neighEven = [[-1,0],[-1,1],[1,0],[1,1]];
-    const neighOdd  = [[-1,-1],[-1,0],[1,-1],[1,0]];
+    const neighEven: [number, number][]= [[-1,0],[-1,1],[1,0],[1,1]];
+    const neighOdd:  [number, number][]= [[-1,-1],[-1,0],[1,-1],[1,0]];
     const neigh = even ? neighEven : neighOdd;
     for (const [dr, dc2] of neigh) {
       let nr = r1 + dr, nc = c1 + dc2;

@@ -1,4 +1,4 @@
-import { GameEngine } from '../src/game/GameEngine';
+import { GameEngine } from '../shared/engine/GameEngine';
 
 export type C = 'red' | 'blue';
 
