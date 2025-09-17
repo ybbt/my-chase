@@ -387,8 +387,8 @@ export const HexBoard: React.FC = () => {
 
   const LeftPanelAbsorb: React.FC = () => {
     // if (!absorb) return <div style={{ gridArea: 'left', padding: 12 }} />;
-    // const a = absorb;
-    
+    // const a = absorb;    
+
     if (!absorb) return <div style={{ gridArea: 'left', padding: 12 }} />;
 
     // 🔽 показувати панель лише захиснику (хто перерозподіляє)
@@ -397,6 +397,7 @@ export const HexBoard: React.FC = () => {
     }
 
     const a = absorb;
+
     return (
       <div style={{
         gridArea: 'left',
