@@ -8,7 +8,8 @@ import { GameEngine } from '../../shared/engine/GameEngine';
 import { COLORS } from '../ui/theme';
 
 // Централізовані API-хелпери
-import { apiCreateGame, apiJoinGame, apiAction, apiSubscribe } from '../api';
+// import { apiCreateGame, apiJoinGame, apiAction, apiSubscribe } from '../api';
+import { apiCreateGame, apiJoinGame, apiAction, apiSubscribe, ensureBackendAwake } from '../api';
 
 type PlayerSlot = 'red' | 'blue';
 
@@ -87,6 +88,8 @@ export const HexBoard: React.FC = () => {
 
   // Легкий UI-алерт
   const [lastError, setLastError] = useState<string | null>(null);
+  // Пасивний індикатор: прокидаємо бекенд (Render Free)
+  const [isWaking, setIsWaking] = useState(false);
   const showError = (msg: string) => {
     setLastError(msg);
     setTimeout(() => setLastError(null), 2200);
@@ -120,6 +123,10 @@ export const HexBoard: React.FC = () => {
 
   // Створити гру і приєднатися як обраний колір
   const createAndJoinAs = async (want: PlayerSlot) => {
+    setIsWaking(true);
+    await ensureBackendAwake(); // 👈 чемно пінгуємо /api/health (холодний старт)
+    setIsWaking(false);
+
     const g = await apiCreateGame();
     setGameId(g.id);
     applyServerState(g.state, g.version);
@@ -134,6 +141,10 @@ export const HexBoard: React.FC = () => {
   // Приєднатися до існуючої гри
   const [joinInput, setJoinInput] = useState('');
   const joinExisting = async (id: string, want?: PlayerSlot) => {
+    setIsWaking(true);
+    await ensureBackendAwake();
+    setIsWaking(false);
+
     setGameId(id);
     const j = await apiJoinGame(id, want);
     setToken(j.token);
@@ -391,11 +402,6 @@ export const HexBoard: React.FC = () => {
           <span style={{ fontSize: 12, color: '#111' }}>
             <b>ID:</b> {gameId} | <b>you:</b> {slot} | <b>turn:</b> {state.currentPlayer} | <b>defender:</b> {absorb ? absorb.defender : '—'} | v{version}
           </span>
-          {/* {showAbsorbWait && (
-            <span style={{ marginLeft: 12, fontSize: 12, color: '#6b7280' }}>
-              Хід суперника: розподіл балів…
-            </span>
-          )} */}
           {isWaitingAbsorb && (
             <span
               aria-label="status-wait-absorb"
@@ -403,6 +409,14 @@ export const HexBoard: React.FC = () => {
             >
               Хід суперника: розподіл балів…{' '}
               <span aria-label="wait-timer">({fmtWait(waitSec)})</span> — нема дій: чекаємо опонента
+            </span>
+          )}
+          {isWaking && (
+            <span
+              aria-label="status-waking"
+              style={{ marginLeft: 12, fontSize: 12, color: '#6b7280' }}
+            >
+              Прокидаємо сервер… це може зайняти до хвилини
             </span>
           )}
           <button style={{ marginLeft: 'auto' }} onClick={() => {

@@ -1,4 +1,35 @@
 // my-chase-frontend/src/api.ts
+
+// 🔹 Одноразове "пробудження" бекенду (Render Free може спати)
+// У тестах (NODE_ENV=test) — no-op, щоб не було мережевих викликів.
+let __warmupPromise: Promise<void> | null = null;
+
+export async function ensureBackendAwake(): Promise<void> {
+  const maybeProcess = (globalThis as any).process;
+  if (maybeProcess?.env?.NODE_ENV === 'test') return; // у jest не пінгуємо
+
+  if (__warmupPromise) return __warmupPromise;
+
+  __warmupPromise = (async () => {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 15_000); // таймаут 15с на холодний старт
+      await fetch('/api/health', {
+        signal: ctrl.signal,
+        cache: 'no-store',                // не брати з кешу
+        headers: { 'cache-control': 'no-cache' },
+      });
+      clearTimeout(t);
+    } catch {
+      // якщо не відповів — ігноруємо, наступний реальний запит все одно піде
+    } finally {
+      __warmupPromise = null; // дозволяємо повторити при наступному кліку через якийсь час
+    }
+  })();
+
+  return __warmupPromise;
+}
+
 export type Id = string;
 
 export async function apiCreateGame(): Promise<{id: Id; state: any; version: number; players:{red:boolean;blue:boolean}}> {
