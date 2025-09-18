@@ -54,6 +54,27 @@ export const HexBoard: React.FC = () => {
   // Всі посилання на state — через engine.state
   const state = engine.state;
   const absorb = state.absorb; // щоб не лаялась TS про possibly undefined
+
+  // ✔ чи атакер чекає, поки суперник розподіляє
+  const isWaitingAbsorb = isOnline && !!absorb && !!slot && slot !== absorb.defender;
+
+  // ✔ таймер очікування (пасивний)
+  const [waitSec, setWaitSec] = useState(0);
+  useEffect(() => {
+    if (isWaitingAbsorb) {
+      setWaitSec(0);
+      const id = setInterval(() => setWaitSec((s) => s + 1), 1000);
+      return () => clearInterval(id);
+    } else {
+      setWaitSec(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWaitingAbsorb, absorb?.defender]);
+
+  const fmtWait = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60)
+      .toString()
+      .padStart(2, '0')}`;
   
   // Чи треба показати атакеру підказку в статус-барі під час чужого розподілу
   const showAbsorbWait = isOnline && !!absorb && !!slot && slot !== absorb.defender;
@@ -370,9 +391,18 @@ export const HexBoard: React.FC = () => {
           <span style={{ fontSize: 12, color: '#111' }}>
             <b>ID:</b> {gameId} | <b>you:</b> {slot} | <b>turn:</b> {state.currentPlayer} | <b>defender:</b> {absorb ? absorb.defender : '—'} | v{version}
           </span>
-          {showAbsorbWait && (
+          {/* {showAbsorbWait && (
             <span style={{ marginLeft: 12, fontSize: 12, color: '#6b7280' }}>
               Хід суперника: розподіл балів…
+            </span>
+          )} */}
+          {isWaitingAbsorb && (
+            <span
+              aria-label="status-wait-absorb"
+              style={{ marginLeft: 12, fontSize: 12, color: '#6b7280' }}
+            >
+              Хід суперника: розподіл балів…{' '}
+              <span aria-label="wait-timer">({fmtWait(waitSec)})</span> — нема дій: чекаємо опонента
             </span>
           )}
           <button style={{ marginLeft: 'auto' }} onClick={() => {

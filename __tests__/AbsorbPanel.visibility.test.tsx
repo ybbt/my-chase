@@ -54,10 +54,19 @@ describe('Absorb panel visibility', () => {
     // Створюємо гру і приєднуємось як RED (defender = BLUE у моку)
     fireEvent.click(screen.getByText('Create (Red)'));
 
+    // статус у хедері має з’явитися
+    // expect(await screen.findByText(/Хід суперника: розподіл балів/i)).toBeTruthy();
+    expect(await screen.findByLabelText('status-wait-absorb')).toBeTruthy();
+    // показуємо таймер у форматі (мм:сс)
+    expect(screen.getByLabelText('wait-timer').textContent).toMatch(/^\(\d{2}:\d{2}\)$/);
+    // і текст-підказку
+    expect(screen.getByText(/чекаємо опонента/i)).toBeTruthy();
+
     await waitFor(() => {
       expect(screen.queryByText(/Поглинання — команда/i)).toBeNull();
     });
-    expect(await screen.findByText(/Хід суперника: розподіл балів/i)).toBeTruthy(); // є підказка в хедері
+    // expect(await screen.findByText(/Хід суперника: розподіл балів/i)).toBeTruthy(); // є підказка в хедері
+    expect(await screen.findByLabelText('status-wait-absorb')).toBeTruthy();
   });
 
   test('захисник (slot === defender) БАЧИТЬ панель', async () => {
