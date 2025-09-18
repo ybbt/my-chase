@@ -57,6 +57,7 @@ describe('Absorb panel visibility', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Поглинання — команда/i)).toBeNull();
     });
+    expect(await screen.findByText(/Хід суперника: розподіл балів/i)).toBeTruthy(); // є підказка в хедері
   });
 
   test('захисник (slot === defender) БАЧИТЬ панель', async () => {

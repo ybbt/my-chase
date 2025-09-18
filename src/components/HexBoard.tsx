@@ -54,6 +54,10 @@ export const HexBoard: React.FC = () => {
   // Всі посилання на state — через engine.state
   const state = engine.state;
   const absorb = state.absorb; // щоб не лаялась TS про possibly undefined
+  
+  // Чи треба показати атакеру підказку в статус-барі під час чужого розподілу
+  const showAbsorbWait = isOnline && !!absorb && !!slot && slot !== absorb.defender;
+
   const gameOver = state.gameOver;
 
   const currentPlayer = state.currentPlayer as PlayerSlot;
@@ -366,6 +370,11 @@ export const HexBoard: React.FC = () => {
           <span style={{ fontSize: 12, color: '#111' }}>
             <b>ID:</b> {gameId} | <b>you:</b> {slot} | <b>turn:</b> {state.currentPlayer} | <b>defender:</b> {absorb ? absorb.defender : '—'} | v{version}
           </span>
+          {showAbsorbWait && (
+            <span style={{ marginLeft: 12, fontSize: 12, color: '#6b7280' }}>
+              Хід суперника: розподіл балів…
+            </span>
+          )}
           <button style={{ marginLeft: 'auto' }} onClick={() => {
             esUnsubRef.current?.();
             setGameId(null); setToken(null); setSlot(null); setVersion(0);
