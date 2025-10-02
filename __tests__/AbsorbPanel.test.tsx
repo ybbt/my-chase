@@ -15,6 +15,7 @@ jest.mock('../src/api', () => {
   };
 
   return {
+    ensureBackendAwake: jest.fn(async () => {}),
     // Створення гри: без absorb
     apiCreateGame: jest.fn(async () => ({
       id: 'g1',

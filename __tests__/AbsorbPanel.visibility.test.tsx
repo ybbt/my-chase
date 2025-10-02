@@ -17,6 +17,7 @@ jest.mock('../src/api', () => {
   };
 
   return {
+    ensureBackendAwake: jest.fn(async () => {}),
     apiCreateGame: jest.fn(async () => ({
       id: 'g1',
       state: { ...baseState },
