@@ -4,6 +4,11 @@
 // У тестах (NODE_ENV=test) — no-op, щоб не було мережевих викликів.
 let __warmupPromise: Promise<void> | null = null;
 
+const API_BASE = (import.meta as any).env?.VITE_API_BASE
+  ? String((import.meta as any).env.VITE_API_BASE).replace(/\/$/, '')
+  : '';
+const apiUrl = (p: string) => `${API_BASE}${p}`;
+
 export async function ensureBackendAwake(): Promise<void> {
   const maybeProcess = (globalThis as any).process;
   if (maybeProcess?.env?.NODE_ENV === 'test') return; // у jest не пінгуємо
@@ -14,7 +19,7 @@ export async function ensureBackendAwake(): Promise<void> {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 15_000); // таймаут 15с на холодний старт
-      await fetch('/api/health', {
+      await fetch(apiUrl('/api/health'), {
         signal: ctrl.signal,
         cache: 'no-store',                // не брати з кешу
         headers: { 'cache-control': 'no-cache' },
@@ -33,13 +38,13 @@ export async function ensureBackendAwake(): Promise<void> {
 export type Id = string;
 
 export async function apiCreateGame(): Promise<{id: Id; state: any; version: number; players:{red:boolean;blue:boolean}}> {
-  const r = await fetch('/api/games', { method: 'POST' });
+  const r = await fetch(apiUrl('/api/games'), { method: 'POST' });
   if (!r.ok) throw new Error('createGame failed');
   return r.json();
 }
 
 export async function apiJoinGame(id: Id, slot?: 'red'|'blue'): Promise<{ok: true; id: Id; slot:'red'|'blue'; token: string; state:any; version:number}> {
-  const r = await fetch(`/api/games/${id}/join${slot ? `?slot=${slot}` : ''}`, { method: 'POST' });
+  const r = await fetch(apiUrl(`/api/games/${id}/join${slot ? `?slot=${slot}` : ''}`), { method: 'POST' });
   if (!r.ok) throw new Error('join failed');
   return r.json();
 }
@@ -56,7 +61,7 @@ export async function apiAction(
     | { type:'absorb.finalize' }
     | { type:'absorb.reset' }
 ) {
-  const r = await fetch(`/api/games/${id}/action`, {
+  const r = await fetch(apiUrl(`/api/games/${id}/action`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -69,7 +74,7 @@ export async function apiAction(
 }
 
 export function apiSubscribe(id: Id, onMsg: (m: {type:string; payload:any}) => void) {
-  const es = new EventSource(`/api/games/${id}/stream`);
+  const es = new EventSource(apiUrl(`/api/games/${id}/stream`));
   es.onmessage = (e) => {
     try { onMsg(JSON.parse(e.data)); } catch {}
   };

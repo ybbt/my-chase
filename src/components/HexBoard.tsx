@@ -78,7 +78,7 @@ export const HexBoard: React.FC = () => {
       .padStart(2, '0')}`;
   
   // Чи треба показати атакеру підказку в статус-барі під час чужого розподілу
-  const showAbsorbWait = isOnline && !!absorb && !!slot && slot !== absorb.defender;
+  // const showAbsorbWait = isOnline && !!absorb && !!slot && slot !== absorb.defender;
 
   const gameOver = state.gameOver;
 

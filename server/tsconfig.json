@@ -3,10 +3,16 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "outDir": "./dist",
+    // "outDir": "./dist",
+    // "rootDir": "./src",
+    // важливо: коренем збірки робимо весь репозиторій (на рівень вище папки server)
+    "rootDir": "../",
+    // і складаємо все в кореневий dist/
+    "outDir": "../dist",
     "strict": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["./src", "../shared/**/*.ts"]
+  // "include": ["./src", "../shared/**/*.ts"]
+  "include": ["./src"]
 }

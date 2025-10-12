@@ -29,7 +29,10 @@ export async function buildServer() {
     reply.code((err as any).statusCode ?? 500).send({ ok:false, error: err.message });
   });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: true,             // або масив/функція з дозволеними походженнями
+    methods: ['GET','POST','OPTIONS'],
+  });
 
   const games = new Map<string, Game>();
   const serialize = (e: GameEngine) => e.state;
