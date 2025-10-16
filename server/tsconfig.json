@@ -3,23 +3,17 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    // "outDir": "./dist",
-    // "rootDir": "./src",    
-    // "rootDir": "../", // важливо: коренем збірки робимо весь репозиторій (на рівень вище папки server)    
-    // "outDir": "../dist", // і складаємо все в кореневий dist/
-    // "rootDir": "..",          // беремо server/src і shared/* відносно кореня репо
-    // "outDir": "./dist",       // КЛАДЕМО ВСЕ У server/dist
+    
     "rootDir": ".",          // ← база – папка server
     "outDir": "./dist",      // ← усе лягає в server/dist
     "strict": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  // "include": ["./src", "../shared/**/*.ts"]
-  // "include": ["./src"]
+  
   "include": [
     "src",
-    // "../shared/**/*.ts"
+    
     "shared/**/*.ts"   // ← використовується junction усередині server/
   ]
 }

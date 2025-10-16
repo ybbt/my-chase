@@ -1,5 +1,5 @@
 // =============================
-// shared/engine/GameEngine.ts
+// shared/engine/GameEngine.js
 // =============================
 export class GameEngine {
     state;

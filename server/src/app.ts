@@ -2,9 +2,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-// import { nanoid } from 'nanoid';
 import { randomUUID } from 'crypto';
-// import { GameEngine } from '../../shared/engine/GameEngine.js';
 import { GameEngine } from '../shared/engine/GameEngine.js'
 
 const genId = () => Math.random().toString(36).slice(2, 10); // 8 символів
@@ -77,7 +75,6 @@ export async function buildServer() {
 
   app.post('/api/games', async (_req, reply) => {
     try {
-    //   const id = nanoid(8);
       const id = genId();
       const engine = new GameEngine();
       const game: Game = { id, engine, version: 1, players: {}, sinks: new Set(), createdAt: Date.now(), updatedAt: Date.now() };
@@ -102,7 +99,6 @@ export async function buildServer() {
       let slot: 'red'|'blue' | undefined = desired && !g.players[desired] ? desired : undefined;
       if (!slot) slot = (['blue','red'] as const).find(s => !g.players[s]);
       if (!slot) return reply.code(409).send({ ok:false, error:'both_slots_taken' });
-    //   const token = nanoid(24);
       const token = genToken();
       g.players[slot] = token;
       g.updatedAt = Date.now();
@@ -122,47 +118,7 @@ export async function buildServer() {
     }
   });
 
-  // app.get('/api/games/:id/stream', async (req, reply) => {
-  //   try {
-  //     const id = (req.params as any).id as string;
-  //     const g = getGameOrThrow(id);
-  //     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
-  //     reply.raw.write(`data: ${JSON.stringify({ type: 'state', payload: { id: g.id, state: serialize(g.engine), version: g.version } })}\n\n`);
-  //     g.sinks.add(reply.raw);
-  //     req.raw.on('close', () => { g.sinks.delete(reply.raw); });
-  //   } catch (e: any) { reply.code(e.statusCode ?? 404).send({ error: e.message }); }
-  // });
-
-//   app.get('/api/games/:id/stream', async (req, reply) => {
-//   try {
-//     const id = (req.params as any).id as string;
-//     const g = getGameOrThrow(id);
-
-//     // ❗ CORS (додай ОБОВ’ЯЗКОВО)
-//     const origin = (req.headers.origin as string | undefined) ?? 'http://127.0.0.1:4173';
-//     reply.header('Access-Control-Allow-Origin', origin);
-//     reply.header('Vary', 'Origin');
-
-//     // ❗ ЖОДНОГО reply.raw.writeHead — тільки через reply.header(...)
-//     reply.header('Content-Type', 'text/event-stream');
-//     reply.header('Cache-Control', 'no-cache');
-//     reply.header('Connection', 'keep-alive');
-//     reply.header('X-Accel-Buffering', 'no');
-
-//     // Відправляємо заголовки й починаємо стрім
-//     reply.raw.flushHeaders?.();
-
-//     const send = (payload: any) =>
-//       reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-
-//     send({ type: 'state', payload: { id, state: serialize(g.engine), version: g.version } });
-
-//     g.sinks.add(reply.raw);
-//     req.raw.on('close', () => { g.sinks.delete(reply.raw); });
-//   } catch (e: any) {
-//     reply.code(e.statusCode ?? 404).send({ error: e.message });
-//   }
-// });
+  
 
 app.get('/api/games/:id/stream', async (req, reply) => {
   const id = (req.params as any).id as string;
@@ -220,19 +176,10 @@ app.get('/api/games/:id/stream', async (req, reply) => {
         assertTurn(g, slot);
       }
 
-    //   let ok = false; const e = g.engine;
-
+    
       let ok = false; const e = g.engine;
 
-    //   switch (a.type) {
-    //     case 'move': e.selectDie(a.from.row, a.from.col); ok = e.moveSelectedTo(a.to.row, a.to.col); break;
-    //     case 'transfer': ok = e.transfer(a.src, a.dst, a.direction, a.amount); break;
-    //     case 'absorb.choose': ok = e.chooseAbsorbAt(a.row, a.col); break;
-    //     case 'absorb.auto': e.forceAutoAbsorb(); ok = true; break;
-    //     case 'absorb.finalize': e.finalizeAbsorb(); ok = true; break;
-    //     case 'absorb.reset': e.resetAbsorb(); ok = true; break;
-    //   }
-
+    
     type Coords = { row: number; col: number };
     type TransferAction = {
         type: 'transfer';
@@ -250,9 +197,7 @@ app.get('/api/games/:id/stream', async (req, reply) => {
         break;
     }
     case 'transfer': {
-        // const t = (parsed.action as z.infer<typeof TransferBody>['action']);
-        // ok = e.transfer(t.src, t.dst, t.direction, t.amount);
-        // break;
+        
         const t = parsed.action as TransferAction;
         ok = e.transfer(t.src, t.dst, t.direction, t.amount);
         break;

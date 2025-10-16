@@ -1,7 +1,6 @@
 // my-chase-frontend/src/hooks/useOnlineGame.ts
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiCreateGame, apiJoinGame, apiAction, apiSubscribe } from '../api';
-// import { GameEngine } from '../../shared/engine/GameEngine'; // для локальної підсвітки
 import { GameEngine } from '@engine/GameEngine'; // для локальної підсвітки
 
 export function useOnlineGame() {
