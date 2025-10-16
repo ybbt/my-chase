@@ -4,7 +4,8 @@ import cors from '@fastify/cors';
 import { z } from 'zod';
 // import { nanoid } from 'nanoid';
 import { randomUUID } from 'crypto';
-import { GameEngine } from '../../shared/engine/GameEngine.js';
+// import { GameEngine } from '../../shared/engine/GameEngine.js';
+import { GameEngine } from '../shared/engine/GameEngine.js'
 
 const genId = () => Math.random().toString(36).slice(2, 10); // 8 символів
 const genToken = () =>
@@ -121,16 +122,76 @@ export async function buildServer() {
     }
   });
 
-  app.get('/api/games/:id/stream', async (req, reply) => {
-    try {
-      const id = (req.params as any).id as string;
-      const g = getGameOrThrow(id);
-      reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
-      reply.raw.write(`data: ${JSON.stringify({ type: 'state', payload: { id: g.id, state: serialize(g.engine), version: g.version } })}\n\n`);
-      g.sinks.add(reply.raw);
-      req.raw.on('close', () => { g.sinks.delete(reply.raw); });
-    } catch (e: any) { reply.code(e.statusCode ?? 404).send({ error: e.message }); }
-  });
+  // app.get('/api/games/:id/stream', async (req, reply) => {
+  //   try {
+  //     const id = (req.params as any).id as string;
+  //     const g = getGameOrThrow(id);
+  //     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+  //     reply.raw.write(`data: ${JSON.stringify({ type: 'state', payload: { id: g.id, state: serialize(g.engine), version: g.version } })}\n\n`);
+  //     g.sinks.add(reply.raw);
+  //     req.raw.on('close', () => { g.sinks.delete(reply.raw); });
+  //   } catch (e: any) { reply.code(e.statusCode ?? 404).send({ error: e.message }); }
+  // });
+
+//   app.get('/api/games/:id/stream', async (req, reply) => {
+//   try {
+//     const id = (req.params as any).id as string;
+//     const g = getGameOrThrow(id);
+
+//     // ❗ CORS (додай ОБОВ’ЯЗКОВО)
+//     const origin = (req.headers.origin as string | undefined) ?? 'http://127.0.0.1:4173';
+//     reply.header('Access-Control-Allow-Origin', origin);
+//     reply.header('Vary', 'Origin');
+
+//     // ❗ ЖОДНОГО reply.raw.writeHead — тільки через reply.header(...)
+//     reply.header('Content-Type', 'text/event-stream');
+//     reply.header('Cache-Control', 'no-cache');
+//     reply.header('Connection', 'keep-alive');
+//     reply.header('X-Accel-Buffering', 'no');
+
+//     // Відправляємо заголовки й починаємо стрім
+//     reply.raw.flushHeaders?.();
+
+//     const send = (payload: any) =>
+//       reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+//     send({ type: 'state', payload: { id, state: serialize(g.engine), version: g.version } });
+
+//     g.sinks.add(reply.raw);
+//     req.raw.on('close', () => { g.sinks.delete(reply.raw); });
+//   } catch (e: any) {
+//     reply.code(e.statusCode ?? 404).send({ error: e.message });
+//   }
+// });
+
+app.get('/api/games/:id/stream', async (req, reply) => {
+  const id = (req.params as any).id as string;
+  const g = getGameOrThrow(id);
+
+  // CORS (якщо різні origin)
+  const origin = (req.headers.origin as string | undefined) ?? 'http://127.0.0.1:4173';
+  reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+  reply.raw.setHeader('Vary', 'Origin');
+
+  // Обовʼязкові заголовки для SSE
+  reply.raw.setHeader('Content-Type', 'text/event-stream');
+  reply.raw.setHeader('Cache-Control', 'no-cache');
+  reply.raw.setHeader('Connection', 'keep-alive');
+  reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+  // 🔑 Захоплюємо відповідь — Fastify більше НЕ втручається (і не змінить MIME)
+  reply.hijack();
+
+  // Відправляємо стартовий state
+  const send = (payload: any) =>
+    reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+  send({ type: 'state', payload: { id, state: serialize(g.engine), version: g.version } });
+
+  // Регіструємо sink і чищення
+  g.sinks.add(reply.raw);
+  req.raw.on('close', () => { g.sinks.delete(reply.raw); });
+});
 
   app.post('/api/games/:id/action', async (req, reply) => {
     try {

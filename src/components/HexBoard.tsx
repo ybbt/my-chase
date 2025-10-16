@@ -4,7 +4,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Die as DieView } from './Die';
-import { GameEngine } from '../../shared/engine/GameEngine';
+// import { GameEngine } from '../../shared/engine/GameEngine';
+import { GameEngine } from '@engine/GameEngine';
 import { COLORS } from '../ui/theme';
 
 // Централізовані API-хелпери

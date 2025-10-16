@@ -7,7 +7,8 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@engine/*": ["./shared/engine/*"]
+      "@engine/*": ["./shared/engine/*"],
+      "@shared/*": ["src/shared/*"]
     }
   }
 }
